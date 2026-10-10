@@ -54,14 +54,12 @@ edge "$diax_archive" web_diax_guest tools/diax_guest_build.sh port/web/diax_gues
 printf '%s\n' 'rule web_msvc_semantics' '  command = node tools/linux_msvc_semantics.mjs --output $out $scan' '  description = WEB MSVC SEMANTICS $out' '  restat = 1'
 mapfile -d '' -t sdk_headers < <(find "$sdk" -maxdepth 1 -type f -name '*.h' -print0 | sort -z)
 mapfile -d '' -t game_headers < <(find source -type f \( -name '*.c' -o -name '*.h' \) -print0 | sort -z)
-printf 'build %s: web_msvc_semantics | build/web/semantics-inputs\n' "$(np "$semantics")"
+edge "$semantics" web_msvc_semantics tools/linux_msvc_semantics.mjs "${sdk_headers[@]}" "${game_headers[@]}"
 printf '  scan = --all-inlines --tags source --inlines source --inlines %s\n' "$sdk"
-# Explicit dependencies have no effect on the semantics command's scan arguments.
-# Emit separate dependency-only phony inputs for both generated headers below.
-edge build/web/semantics-inputs phony tools/linux_msvc_semantics.mjs "${sdk_headers[@]}" "${game_headers[@]}"
-printf 'build %s: web_msvc_semantics | build/web/platform-semantics-inputs\n' "$(np "$platform_semantics")"
+# These are real file inputs so restat can record their actual newest mtime.
+# The command scans $scan, independently of the dependency list.
+edge "$platform_semantics" web_msvc_semantics tools/linux_msvc_semantics.mjs "${sdk_headers[@]}"
 printf '  scan = --inlines %s\n' "$sdk"
-edge build/web/platform-semantics-inputs phony tools/linux_msvc_semantics.mjs "${sdk_headers[@]}"
 printf 'rule web_cc\n  command = mkdir -p "$$(dirname "$out")" && %s$web_cc -MMD -MF $out.d $cflags -c $in -o $out\n  description = WEB CC $out\n  depfile = $out.d\n  deps = gcc\n' "$(if [[ -n $launcher ]]; then literal "$(sq "$launcher") "; fi)"
 printf '%s\n' 'rule web_link' '  command = $web_cc $ldflags -o $out @$out.rsp $libs' '  description = WEB LINK $out' '  rspfile = $out.rsp' '  rspfile_content = $in_newline'
 objects=()

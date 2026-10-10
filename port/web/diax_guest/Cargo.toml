@@ -7,7 +7,7 @@ publish = false
 [workspace]
 
 [lib]
-crate-type = ["staticlib", "rlib"]
+crate-type = ["staticlib"]
 
 [dependencies]
 modding_runtime = { path = "../../../../diax/crates/modding/runtime" }

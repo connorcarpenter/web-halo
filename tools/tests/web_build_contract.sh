@@ -10,7 +10,7 @@ require "web_cc = '/sdk with spaces/emcc'"
 require 'build build/web/obj/port/web/src/web_online_ui.o: web_cc port/web/src/web_online_ui.c'
 require 'build build/web/obj/source/game/campaign_coop.o: web_cc source/game/campaign_coop.c'
 require 'node tools/linux_msvc_semantics.mjs --output $out $scan'
-require 'web_msvc_semantics | build/web/semantics-inputs'
+require 'build build/web/halo_msvc_semantics.h: web_msvc_semantics tools/linux_msvc_semantics.mjs'
 require '-DHALO_RELEASE'
 require '-sASSERTIONS=0'
 require '-sINITIAL_MEMORY=2415919104'
