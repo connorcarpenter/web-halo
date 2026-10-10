@@ -74,6 +74,8 @@ dependencies are identical.
 #include "../../port/web/src/web_online_ui.h"
 #endif
 
+#include "main_screenshot.h"
+
 void halt_and_catch_fire(
 	void)
 {

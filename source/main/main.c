@@ -649,24 +649,7 @@ struct game_options
 typedef char game_options_size_assert[
 	sizeof(struct game_options) == 0x10C ? 1 : -1];
 
-#pragma pack(push, 1)
-struct _screenshot_and_framerate_globals
-{
-	short count;
-	byte reserved002[6];
-	struct render_window windows[MAXIMUM_WINDOWS + 1];
-	real framerate_samples[8];
-	word framerate_flags;
-	char framerate_sample_index;
-	boolean framerate_active;
-	char framerate_counter;
-	boolean framerate_reset;
-	boolean halt_recursion_lock;
-};
-#pragma pack(pop)
-
-typedef char screenshot_and_framerate_globals_size_assert[
-	sizeof(struct _screenshot_and_framerate_globals) == 0x38B ? 1 : -1];
+#include "main_screenshot.h"
 
 #ifdef HALO_LINUX
 void network_test_update(boolean main_menu_loaded, real seconds);
