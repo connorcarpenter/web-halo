@@ -81,6 +81,7 @@ export function generate(options, args = []) {
   const posix = ['--target=i686-linux-gnu', '-m32', '-std=gnu11', '-D_GNU_SOURCE', '-D_FILE_OFFSET_BITS=64', '-fno-pic', '-O2', '-g', '-Wall', march];
   const objects = [];
   const seen = new Set();
+  let campaignFlags;
   function add(source, cflags, native = false) {
     if (seen.has(source)) throw new Error(`Duplicate object source: ${source}`);
     seen.add(source);
@@ -91,6 +92,7 @@ export function generate(options, args = []) {
   for (const project of solution.projects.filter(project => config.projects.includes(project.name))) {
     const includes = (project.options.include_dirs ?? []).filter(dir => dir !== 'xbox/include').map(dir => `-I${shellQuote(dir)}`);
     const game = [...abi, ...gameFlags, '-include', prefix, '-include', semantics, ...(project.options.defines ?? []).map(value => `-D${value}`), '-Iport/linux/include', ...includes, '-idirafter', 'port/include/xdk'];
+    if (project.name === 'halobetacache') campaignFlags = game;
     const selected = project.objects.filter(object => object.status !== 'MISSING' && /\.c$/i.test(object.name) && !config.exclude_sources.includes(object.name)).map(object => object.name);
     // Campaign slice is authored after the imported config; never omit its implementation.
     if (project.name === 'halobetacache' && fs.existsSync('source/game/campaign_coop.c') && !selected.includes('source/game/campaign_coop.c')) selected.push('source/game/campaign_coop.c');
@@ -115,6 +117,17 @@ export function generate(options, args = []) {
     libs: flags(config.libraries.map(lib => `-l${lib}`)),
   });
   n.build('linux', 'phony', ['build/linux/halo']);
+  const campaignControl = 'port/web/tests/campaign_coop_native_controls_test.c';
+  if (campaignFlags && fs.existsSync(campaignControl)) {
+    const controlObject = 'build/linux/obj/port/web/tests/campaign_coop_native_controls_test.o';
+    n.build(controlObject, 'linux_cc', [campaignControl], [prefix, semantics, ...sdk], { cflags: flags([...campaignFlags, ...lto]) });
+    n.rule('native_control_link', { command: '$linux_cc $ldflags $in -o $out', description: 'NATIVE CONTROL LINK $out' });
+    n.build('build/linux/campaign_coop_native_controls', 'native_control_link', ['build/linux/obj/source/game/campaign_coop.o', controlObject], [], {
+      ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, ...(lto.length ? [options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld'] : [])]),
+    });
+    n.rule('native_control_run', { command: '$in', description: 'RUN campaign native controls' });
+    n.build('campaign-native-controls', 'native_control_run', ['build/linux/campaign_coop_native_controls']);
+  }
   n.lines.push('default linux');
   return n.toString();
 }
