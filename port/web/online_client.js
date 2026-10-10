@@ -55,6 +55,11 @@
   });
 
   var COMMAND = Object.freeze({ HOST: 1, JOIN: 2, CANCEL: 3 });
+  /* Hazard Run campaign contract (Finn, slice 1): seats are 1..4, published
+     from the admitted roster, never from a local counter. Episodes are a bare
+     zero-based index until the content catalog lands; labels are derived. */
+  var CAMPAIGN_MAX_SEATS = 4;
+  var CAMPAIGN_MAX_EPISODE_INDEX = 255;
   var GAME_STATE = Object.freeze({
     IDLE: 0,
     WAITING: 1,
@@ -123,6 +128,7 @@
     profile: null,
     hostWasReady: false,
     hostSettings: null,
+    campaign: null,
     guestWasJoined: false,
     leavePromise: null,
     joinRequested: false,
@@ -750,10 +756,19 @@
       return leftName.localeCompare(rightName);
     });
     if (elements.playerCount) {
-      elements.playerCount.textContent = players.length + "/" + ROOM_CAPACITY;
-      elements.playerCount.setAttribute(
-        "aria-label",
-        "Players in room: " + players.length + " of " + ROOM_CAPACITY);
+      if (session.campaign) {
+        elements.playerCount.textContent =
+          players.length + "/" + CAMPAIGN_MAX_SEATS + " seats";
+        elements.playerCount.setAttribute(
+          "aria-label",
+          "Players in campaign session: " + players.length +
+            " of " + CAMPAIGN_MAX_SEATS + " seats");
+      } else {
+        elements.playerCount.textContent = players.length + "/" + ROOM_CAPACITY;
+        elements.playerCount.setAttribute(
+          "aria-label",
+          "Players in room: " + players.length + " of " + ROOM_CAPACITY);
+      }
     }
     if (elements.playerEmpty) elements.playerEmpty.hidden = players.length !== 0;
     if (elements.playerList && typeof document.createElement === "function") {
@@ -963,9 +978,38 @@
   }
 
   function hostSettingsLabel() {
+    if (session.campaign) return campaignSettingsLabel();
     return session.hostSettings ?
       session.hostSettings.mapName + " · " + session.hostSettings.modeName :
       "Your game";
+  }
+
+  function normalizeCampaignSettings(value) {
+    var source = value || {};
+    var episodeIndex = source.episodeIndex === undefined ? 0 : source.episodeIndex;
+    var seatCount = source.seatCount === undefined ? 1 : source.seatCount;
+    episodeIndex = integerSetting(episodeIndex, 0, CAMPAIGN_MAX_EPISODE_INDEX, "Episode");
+    seatCount = integerSetting(seatCount, 1, CAMPAIGN_MAX_SEATS, "Seats");
+    return {
+      episodeIndex: episodeIndex,
+      seatCount: seatCount,
+      episodeName: "Episode " + (episodeIndex + 1),
+    };
+  }
+
+  function campaignSettingsLabel() {
+    if (!session.campaign) return "Your campaign";
+    return session.campaign.episodeName + " · " + session.campaign.seatCount +
+      (session.campaign.seatCount === 1 ? " seat" : " seats");
+  }
+
+  function requestCampaignHost(settings) {
+    var accepted = wasmFunction("platform_web_online_campaign_host_configured")(
+      settings.episodeIndex,
+      settings.seatCount);
+    if (!accepted) {
+      throw new Error("Halo could not accept those campaign settings.");
+    }
   }
 
   function connectedFriendsLabel(count) {
@@ -1757,6 +1801,84 @@
     }
   }
 
+  /* Hazard Run campaign host: the room/invite/roster flow is the current room
+     protocol unchanged; only the game command carries episode/seats, and the
+     roster is captioned against the four-seat contract. Multiplayer host()
+     below is byte-identical in behavior. */
+  async function campaignHost(value, turnstileToken) {
+    if (!session.runtimeReady) throw new Error("Halo is still starting.");
+    var settings = normalizeCampaignSettings(value);
+    var profile = readPlayerProfile();
+    savePlayerProfile(profile);
+    await leave(false);
+    var operation = ++session.operationGeneration;
+    session.active = true;
+    session.role = "host";
+    session.campaign = settings;
+    syncTelemetryContext();
+    session.closing = false;
+    renderRoster();
+    showDialog();
+    showProgress();
+    setBusy(true);
+    setHeader("Opening campaign room…", "waiting");
+    setStatus("Preparing " + campaignSettingsLabel() + "…");
+    var recoveredVerification = false;
+    try {
+      var roomRequest = {
+        protocolVersion: PROTOCOL_VERSION,
+        buildId: buildId(),
+        capacity: ROOM_CAPACITY,
+        identifier: localIdentifier(),
+      };
+      if (turnstileToken) roomRequest.turnstileToken = turnstileToken;
+      var result = await fetchJson("/v1/rooms", {
+        method: "POST",
+        body: JSON.stringify(roomRequest),
+      });
+      requireCurrentOperation(operation);
+      var normalized = {
+        v: result.v,
+        room: result.room,
+        session: result.host && result.host.session,
+      };
+      validateRoomResponse(normalized);
+      session.room = result.room;
+      session.roomTicket = result.host.ticket;
+      session.selfPeerId = result.host.session.peerId;
+      updateLocalRoster();
+      session.inviteCode = result.invite && result.invite.code;
+      if (!session.inviteCode) throw new Error("The room did not return an invite.");
+      /* Keep the visible host and path that the player opened. This lets the
+         same signaling service support a staged origin without leaking its
+         canonical production URL into preview invites. */
+      session.inviteUrl = makeInviteUrl(session.inviteCode);
+      showInvite();
+      session.iceServers = Array.isArray(result.iceServers) ? result.iceServers : [];
+      configureTransport(session.iceServers);
+      await openSocket(result.host.session.websocketUrl, operation);
+      requireCurrentOperation(operation);
+      applyPlayerCustomization(profile);
+      requestCampaignHost(settings);
+      session.gameCommandIssued = true;
+      startGamePolling();
+      setHeader("Preparing campaign lobby…", "waiting");
+      setStatus("Opening Halo's campaign lobby with " + campaignSettingsLabel() + "…");
+    } catch (error) {
+      if (operation === session.operationGeneration && (!error || !error.haloCanceled)) {
+        if (isTurnstileRejection(error)) {
+          recoveredVerification = true;
+          await recoverTurnstile("create_room");
+        } else {
+          fail(error);
+        }
+      }
+    } finally {
+      if (!recoveredVerification) resetTurnstile();
+      if (operation === session.operationGeneration) setBusy(false);
+    }
+  }
+
   async function join(value, turnstileToken) {
     if (!session.runtimeReady) {
       showDialog();
@@ -1903,6 +2025,7 @@
     session.messageChain = Promise.resolve();
     session.hostWasReady = false;
     session.hostSettings = null;
+    session.campaign = null;
     session.guestWasJoined = false;
     session.pendingInvite = null;
     session.joinRequested = false;
@@ -2163,6 +2286,7 @@
       }
     },
     host: host,
+    campaignHost: campaignHost,
     join: join,
     leave: function() { return leave(true); },
   });
