@@ -59,3 +59,10 @@ they do not establish map loading, save writing, or checkpoint restoration.
 The full game target separately proves the production hook/accessor link.
 SDL backend discovery and successful ELF32 linking are not live video/audio or
 multiplayer acceptance.
+
+Every future native qualification of a head carrying
+`source/game/campaign_coop.c` must also run `campaign-native-controls` and
+report its actual PASS count and unpiped exit. Retain the same two-object target;
+the expected count is 19 for Finn's test at `54fcc6b`, and its writer names any
+changed count when updating the test. A successful game link alone is not this
+behavioral guard.
