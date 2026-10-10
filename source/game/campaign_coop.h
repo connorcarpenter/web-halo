@@ -29,6 +29,10 @@ enum
 	 * locations; spawn selection reads scenario->players at runtime */
 	CAMPAIGN_COOP_REQUIRED_STARTING_LOCATIONS = 4,
 
+	/* eight authored Hazard Run episodes, zero-based on the wire and in
+	 * the recorded host handoff (episode 1 == 0) */
+	CAMPAIGN_COOP_EPISODE_COUNT = 8,
+
 	/* matches the engine NONE convention for an unseated slot */
 	CAMPAIGN_COOP_NO_SEAT = -1,
 };
@@ -133,6 +137,50 @@ short campaign_coop_total_seats(
 /* Committed seats local to this machine (local_player_index != NONE).
  * Same pre-commit fallback as campaign_coop_total_seats. */
 short campaign_coop_local_seats(
+	void);
+
+/* Pure host-handoff core behind campaign_coop_host_configure, over the two
+ * recorded values. Static inline so the validation is exactly the same
+ * bytes in the engine and in the standalone formation test. */
+static inline bool campaign_coop_host_config_valid(
+	int16_t episode_index,
+	int16_t seat_count)
+{
+	return episode_index >= 0 &&
+		episode_index < CAMPAIGN_COOP_EPISODE_COUNT &&
+		campaign_coop_seat_count_valid(seat_count);
+}
+
+/* Slice 3 host bring-up. Records the browser lobby's (episode, seats)
+ * handoff for this machine's campaign session: binds the episode the next
+ * map-load form carries, and arms the admit cap the server path reads
+ * through campaign_coop_host_cap(). Strict: an out-of-range handoff is
+ * refused and the prior record stands. Returns false on refusal. */
+bool campaign_coop_host_configure(
+	int16_t episode_index,
+	int16_t seat_count);
+
+/* Recorded episode for the next form, or CAMPAIGN_COOP_NO_SEAT when no
+ * host handoff is recorded. */
+int16_t campaign_coop_host_episode(
+	void);
+
+/* Armed admit cap for the server path, or 0 when no host handoff is
+ * recorded (multiplayer and unconfigured campaign host games keep their
+ * own maximum_player_count). */
+short campaign_coop_host_cap(
+	void);
+
+/* Notes a server admit-path outcome for the session_full wire: a refusal
+ * latches session_full only while a host cap is armed (a full multiplayer
+ * game is not a full campaign session); any admission clears the latch. */
+void campaign_coop_note_admit(
+	bool admitted);
+
+/* Latched campaign session_full: true once a join was refused at the
+ * armed host cap, until the next admission or host reconfigure. False
+ * before any host handoff. */
+bool campaign_coop_session_full(
 	void);
 
 #endif /* CAMPAIGN_COOP_H */

@@ -1,8 +1,9 @@
-/* Hazard Run campaign co-op formation test (Vehicle A, slice 2).
+/* Hazard Run campaign co-op formation test (Vehicle A, slices 2-3).
  *
  * Header-only standalone build: exercises the exact admission policy bytes
  * the engine runs (static inline in source/game/campaign_coop.h), with no
- * engine link. The stateful engine glue in source/game/campaign_coop.c
+ * engine link. Slice 3 adds the host-handoff validation core. The stateful
+ * engine glue in source/game/campaign_coop.c
  * (live roster iteration, commit, total/local accessors) is not compiled
  * here: it includes engine headers carrying a 32-bit layout assertion that
  * cannot pass under the host 64-bit gcc, so its compile belongs to the
@@ -76,6 +77,18 @@ int main(
 	CHECK(campaign_coop_session_form_from_roster(&session, CAMPAIGN_COOP_NO_SEAT, machines, locals, indices, 2) == true);
 	CHECK(session.episode_index == CAMPAIGN_COOP_NO_SEAT);
 	CHECK(session.seat_count == 2);
+
+	/* Slice 3 host handoff validation: eight zero-based episodes, 1..4
+	 * seats. Anything else is refused and the prior record stands. */
+	CHECK(CAMPAIGN_COOP_EPISODE_COUNT == 8);
+	CHECK(campaign_coop_host_config_valid(0, 1) == true);
+	CHECK(campaign_coop_host_config_valid(7, 4) == true);
+	CHECK(campaign_coop_host_config_valid(3, 2) == true);
+	CHECK(campaign_coop_host_config_valid(CAMPAIGN_COOP_NO_SEAT, 2) == false);
+	CHECK(campaign_coop_host_config_valid(8, 2) == false);
+	CHECK(campaign_coop_host_config_valid(0, 0) == false);
+	CHECK(campaign_coop_host_config_valid(0, 5) == false);
+	CHECK(campaign_coop_host_config_valid(-2, 9) == false);
 
 	/* NULL session is refused, never dereferenced. */
 	CHECK(campaign_coop_session_form_from_roster(0, 0, machines, locals, indices, 2) == false);

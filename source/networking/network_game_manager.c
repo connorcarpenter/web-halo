@@ -78,6 +78,7 @@ symbols in this file:
 
 #include "cseries/cseries.h"
 #include "cseries/errors.h"
+#include "game/campaign_coop.h"
 #include "game/game.h"
 #include "game/game_engine.h"
 #include "game/players.h"
@@ -322,13 +323,21 @@ boolean network_game_add_player(
 	long player_index;
 	long new_player_index;
 	boolean result = FALSE;
+	/* Hazard Run (Vehicle A, slice 3): a configured campaign host admits
+	 * only its recorded seat count, even though the game slots hold more.
+	 * Unconfigured games (multiplayer, unconfigured campaign) keep their
+	 * own maximum_player_count exactly. */
+	short admit_cap = game->maximum_player_count;
+	short host_cap = campaign_coop_host_cap();
 
 	match_assert(
 		"c:\\halo\\SOURCE\\networking\\network_game_manager.c",
 		0xBB,
 		game && player);
 
-	if (game->player_count < game->maximum_player_count)
+	if (host_cap != 0 && host_cap < admit_cap)
+		admit_cap = host_cap;
+	if (game->player_count < admit_cap)
 	{
 		if (VALID_INDEX(player->machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) &&
 			VALID_INDEX(player->controller_index, MAXIMUM_LOCAL_PLAYERS))
@@ -361,6 +370,7 @@ boolean network_game_add_player(
 					csmemcpy(&game->players[new_player_index], player, sizeof(struct network_player));
 					game->player_count++;
 					result = TRUE;
+					campaign_coop_note_admit(TRUE);
 				}
 			}
 		}
@@ -368,6 +378,9 @@ boolean network_game_add_player(
 	else
 	{
 		error(2, "game is already at maximum players; can't add new player");
+		/* Latches campaign session_full only while a host cap is armed;
+		 * a full multiplayer game leaves the wire alone. */
+		campaign_coop_note_admit(FALSE);
 	}
 
 	return result;

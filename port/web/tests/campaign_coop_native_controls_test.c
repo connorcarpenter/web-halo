@@ -1,4 +1,4 @@
-/* Hazard Run campaign formation native controls (Vehicle A, slice 2).
+/* Hazard Run campaign formation native controls (Vehicle A, slices 2-3).
  *
  * NATIVE-TOOLCHAIN ONLY. Do not build this file with the host gcc: it
  * includes real engine headers (game/players.h, memory/data.h) that carry
@@ -9,8 +9,9 @@
  * Unlike port/web/tests/campaign_coop_formation_test.c (header policy
  * only), this file compiles the UNMODIFIED source/game/campaign_coop.c and
  * drives its real live path: the data-iterator roster loop in
- * campaign_coop_session_form(), the commit store, and the total/local
- * accessors. Only the backing store is stubbed at link level — the fake
+ * campaign_coop_session_form(), the commit store, the total/local
+ * accessors, and (slice 3) the host record with the session_full wire.
+ * Only the backing store is stubbed at link level — the fake
  * player_data served through stub data_iterator_new/next, and the
  * player_spawn_count fallback value. Every policy byte under test ships
  * in the game.
@@ -147,6 +148,42 @@ int main(
 	/* NULL safety on the commit/form boundary. */
 	campaign_coop_session_commit(0);
 	CHECK(campaign_coop_session_form(0, 0) == FALSE);
+
+	/* HOST controls (slice 3): the unconfigured record reads empty, and a
+	 * refusal with no armed cap leaves the session_full wire alone (a full
+	 * multiplayer game is not a full campaign session). */
+	CHECK(campaign_coop_host_episode() == CAMPAIGN_COOP_NO_SEAT);
+	CHECK(campaign_coop_host_cap() == 0);
+	CHECK(campaign_coop_session_full() == FALSE);
+	campaign_coop_note_admit(FALSE);
+	CHECK(campaign_coop_session_full() == FALSE);
+
+	/* Refused handoffs record nothing; the prior (empty) record stands. */
+	CHECK(campaign_coop_host_configure(8, 2) == FALSE);
+	CHECK(campaign_coop_host_configure(0, 5) == FALSE);
+	CHECK(campaign_coop_host_configure(CAMPAIGN_COOP_NO_SEAT, 0) == FALSE);
+	CHECK(campaign_coop_host_episode() == CAMPAIGN_COOP_NO_SEAT);
+	CHECK(campaign_coop_host_cap() == 0);
+
+	/* Accepted handoff binds the episode and arms the admit cap. */
+	CHECK(campaign_coop_host_configure(2, 3) == TRUE);
+	CHECK(campaign_coop_host_episode() == 2);
+	CHECK(campaign_coop_host_cap() == 3);
+	CHECK(campaign_coop_session_full() == FALSE);
+
+	/* Wire: an armed-cap refusal latches full; an admission clears it. */
+	campaign_coop_note_admit(FALSE);
+	CHECK(campaign_coop_session_full() == TRUE);
+	campaign_coop_note_admit(TRUE);
+	CHECK(campaign_coop_session_full() == FALSE);
+
+	/* Reconfigure replaces the record and clears the latch. */
+	campaign_coop_note_admit(FALSE);
+	CHECK(campaign_coop_session_full() == TRUE);
+	CHECK(campaign_coop_host_configure(0, 1) == TRUE);
+	CHECK(campaign_coop_host_episode() == 0);
+	CHECK(campaign_coop_host_cap() == 1);
+	CHECK(campaign_coop_session_full() == FALSE);
 
 	printf("PASS campaign_coop_native_controls: %d checks\n", checks_run);
 	return 0;

@@ -27,6 +27,14 @@
 static struct campaign_coop_session campaign_coop_committed_session;
 static bool campaign_coop_session_committed = false;
 
+/* Slice 3 host record, written by campaign_coop_host_configure() from the
+ * browser lobby handoff. Unconfigured until the first accepted handoff;
+ * reconfiguring replaces the record and clears the session_full latch. */
+static bool campaign_coop_host_recorded = false;
+static int16_t campaign_coop_host_recorded_episode = CAMPAIGN_COOP_NO_SEAT;
+static int16_t campaign_coop_host_recorded_seats = 0;
+static bool campaign_coop_full_latched = false;
+
 bool campaign_coop_session_form(
 	struct campaign_coop_session *session,
 	int16_t episode_index)
@@ -98,4 +106,58 @@ short campaign_coop_local_seats(
 	}
 
 	return local_seats;
+}
+
+bool campaign_coop_host_configure(
+	int16_t episode_index,
+	int16_t seat_count)
+{
+	if (!campaign_coop_host_config_valid(episode_index, seat_count))
+		return false;
+
+	campaign_coop_host_recorded_episode = episode_index;
+	campaign_coop_host_recorded_seats = seat_count;
+	campaign_coop_host_recorded = true;
+	campaign_coop_full_latched = false;
+
+	return true;
+}
+
+int16_t campaign_coop_host_episode(
+	void)
+{
+	if (!campaign_coop_host_recorded)
+		return CAMPAIGN_COOP_NO_SEAT;
+
+	return campaign_coop_host_recorded_episode;
+}
+
+short campaign_coop_host_cap(
+	void)
+{
+	if (!campaign_coop_host_recorded)
+		return 0;
+
+	return campaign_coop_host_recorded_seats;
+}
+
+void campaign_coop_note_admit(
+	bool admitted)
+{
+	if (admitted)
+	{
+		campaign_coop_full_latched = false;
+	}
+	else if (campaign_coop_host_recorded)
+	{
+		campaign_coop_full_latched = true;
+	}
+
+	return;
+}
+
+bool campaign_coop_session_full(
+	void)
+{
+	return campaign_coop_full_latched;
 }
