@@ -45,6 +45,7 @@ test('authored campaign units join the production and native control graph exact
   assert.ok(productionEdge.includes('build/linux/obj/source/shell/shell_entry.o'));
   assert.ok(!controlEdge.includes('source/shell/shell_entry.o'));
   for (const name of authored) assert.ok(controlEdge.includes(`build/linux/obj/source/game/${name}.o`));
+  assert.ok(controlEdge.includes('build/linux/obj/source/game/campaign_mission_associate.o'));
   assert.ok(controlEdge.includes('build/linux/obj/port/web/tests/campaign_coop_native_controls_test.o'));
   if (fs.existsSync('port/web/tests/campaign_mission_author_test.c')) {
     assert.match(output, /build build\/linux\/campaign_mission_author_controls: native_engine_control_link/);

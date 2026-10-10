@@ -127,6 +127,7 @@ export function generate(options, args = []) {
     const controlInputs = ['build/linux/obj/source/game/campaign_coop.o', controlObject];
     if (fs.existsSync('source/game/campaign_mission.c')) controlInputs.splice(1, 0, 'build/linux/obj/source/game/campaign_mission.o');
     if (fs.existsSync('source/game/campaign_mission_apply.c')) controlInputs.splice(2, 0, 'build/linux/obj/source/game/campaign_mission_apply.o');
+    if (fs.existsSync('source/game/campaign_mission_associate.c')) controlInputs.splice(3, 0, 'build/linux/obj/source/game/campaign_mission_associate.o');
     n.build('build/linux/campaign_coop_native_controls', 'native_control_link', controlInputs, [], {
       ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, ...(lto.length ? [options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld'] : [])]),
     });
