@@ -529,6 +529,18 @@ function expectedCalls(mission) {
     encounterCount: 2,
   }));
 
+  /* The public receipt is a snapshot: a UI consumer must not be able to
+     change the terminal saved identity used by later readback. */
+  const exposed = context.HaloOnline.missionLastSaved();
+  exposed.name = 'Unsaved draft';
+  exposed.episodeIndex = 7;
+  exposed.encounterCount = 0;
+  assert.ok(receiptEqual(context.HaloOnline.missionLastSaved(), {
+    name: 'Deck Breach',
+    episodeIndex: 1,
+    encounterCount: 2,
+  }), 'editing a returned receipt must not change the retained saved receipt');
+
   /* A refused save keeps the last proven receipt: nothing was written. A
      new request does not supersede it either; only a terminal save does. */
   const proven = context.HaloOnline.missionLastSaved();

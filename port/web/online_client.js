@@ -1177,7 +1177,7 @@
     if (recorded === ((pending.episodeIndex << 8) | pending.encounterCount)) {
       /* Retain the proven receipt for the future activated-episode
          readback (Finn 61813): it compares against exactly this shape.
-         A refusal never moves it; only a terminal save or a new request. */
+         A refusal or new request never moves it; only a terminal save. */
       session.lastSavedMission = {
         name: pending.name,
         episodeIndex: pending.episodeIndex,
@@ -1221,7 +1221,13 @@
 
   function missionLastSaved() {
     if (!session.runtimeReady) throw new Error("Halo is still starting.");
-    return session.lastSavedMission || null;
+    var saved = session.lastSavedMission;
+    if (!saved) return null;
+    return {
+      name: saved.name,
+      episodeIndex: saved.episodeIndex,
+      encounterCount: saved.encounterCount,
+    };
   }
 
   /* Hazard Run editor roundtrip (Usher 61730): the drain confirms on the
