@@ -7,6 +7,8 @@ import { Writer, literal } from './ninja_syntax.mjs';
 export const HELP = `Usage: sh configure.sh [configure] [--linux-cc BINARY]
   --compiler-launcher BINARY  Compile-only launcher
   --linux-nm BINARY           Symbol reader (use matching llvm-nm for LTO)
+  --linux-ld BINARY           Explicit LTO linker (default: lld on PATH)
+  --native-prefix DIRECTORY  Project-local SDL3 installation prefix
   --release                  Omit assertions/debug game data
   --portable                 SSE2 baseline instead of host tuning
   --lto full|thin|off         Default: thin
@@ -14,8 +16,8 @@ export const HELP = `Usage: sh configure.sh [configure] [--linux-cc BINARY]
 Native target: ninja linux. Web/Android/authentic-Xbox/PGO tooling is not ported.
 Unsupported options are refused, never silently ignored.`;
 export function parseArgs(args) {
-  const options = { cc: 'clang', nm: 'llvm-nm', launcher: '', release: false, portable: false, lto: 'thin', pgo: 'off' };
-  const values = { '--linux-cc': 'cc', '--linux-nm': 'nm', '--compiler-launcher': 'launcher', '--lto': 'lto', '--pgo': 'pgo' };
+  const options = { cc: 'clang', nm: 'llvm-nm', ld: '', prefix: '', launcher: '', release: false, portable: false, lto: 'thin', pgo: 'off' };
+  const values = { '--linux-cc': 'cc', '--linux-nm': 'nm', '--linux-ld': 'ld', '--native-prefix': 'prefix', '--compiler-launcher': 'launcher', '--lto': 'lto', '--pgo': 'pgo' };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--help' || arg === '-h') return { help: true };
@@ -95,7 +97,7 @@ export function generate(options, args = []) {
     for (const source of selected) add(source, game);
     for (const source of files(config.game_sources, ['.c'])) add(source, game);
   }
-  const platform = [...abi, ...platformFlags, '-include', prefix, '-include', platformSemantics, `-I${config.platform_sources}`, '-Iport/linux/include', '-Iport/third_party/tomlc17', '-Iport/third_party/kcp', '-Isource', '-Isource/cseries', '-idirafter', 'port/include/xdk'];
+  const platform = [...abi, ...platformFlags, '-include', prefix, '-include', platformSemantics, `-I${config.platform_sources}`, '-Iport/linux/include', '-Iport/third_party/tomlc17', '-Iport/third_party/kcp', '-Isource', '-Isource/cseries', ...(options.prefix ? [`-I${shellQuote(path.join(options.prefix, 'include'))}`] : []), '-idirafter', 'port/include/xdk'];
   for (const source of files(config.platform_sources, ['.c'])) {
     const name = path.basename(source);
     if (name === 'posix_update.c') add(source, [...posix, `-I${config.platform_sources}`, '-Iport/third_party/mbedtls/include'], true);
@@ -109,7 +111,7 @@ export function generate(options, args = []) {
   for (const source of ['port/third_party/tomlc17/tomlc17.c', 'port/third_party/kcp/ikcp.c']) add(source, [...abi, '-std=gnu11', '-w']);
   for (const source of files('port/third_party/musl-math/src', ['.c'])) add(source, [...abi, '-std=gnu11', '-w', '-Iport/third_party/musl-math/include', '-include', 'port/third_party/musl-math/include/libm.h']);
   n.build('build/linux/halo', 'linux_link', objects, ['tools/linux_link_check.mjs'], {
-    ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', '-g', ...lto, ...(lto.length ? ['-fuse-ld=lld', '-O2'] : []), ...(options.lto === 'thin' ? ['-Wl,--thinlto-cache-dir=build/linux/thinlto-cache'] : [])]),
+    ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', '-g', ...lto, ...(lto.length ? [options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld', '-O2'] : []), ...(options.prefix ? [`-L${shellQuote(path.join(options.prefix, 'lib'))}`, `-Wl,-rpath,${shellQuote(path.resolve(options.prefix, 'lib'))}`] : []), ...(options.lto === 'thin' ? ['-Wl,--thinlto-cache-dir=build/linux/thinlto-cache'] : [])]),
     libs: flags(config.libraries.map(lib => `-l${lib}`)),
   });
   n.build('linux', 'phony', ['build/linux/halo']);
