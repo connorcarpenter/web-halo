@@ -52,6 +52,20 @@ unsigned char player_ui_configure_network_server_game_advanced(
 	unsigned char invisible_players,
 	unsigned char other_players_on_radar);
 void game_connection_set(short connection);
+/* Hazard Run mission authoring commit (source/game/campaign_mission.c).
+ * Short scalars and flat arrays, matching the game's ABI at this
+ * boundary. The bridge never assembles a mission record itself: the
+ * mailbox below stages scalars, and the game-thread drain hands them to
+ * this entry, which validates canonically and resolves the store. */
+int campaign_mission_author_commit(
+	short episode_index,
+	const char *mission_name,
+	const short *trigger_volumes,
+	const short *actor_types,
+	const short *actor_counts,
+	const short *anchors,
+	short encounter_count,
+	int *recorded_out);
 /* Hazard Run campaign host record (source/game/campaign_coop.c). Byte
  * boolean and short scalars, matching the game's ABI at this boundary. */
 unsigned char campaign_coop_host_configure(short episode_index, short seat_count);
@@ -140,6 +154,37 @@ static unsigned int web_online_applied_customization_sequence;
 static atomic_int web_online_requested_campaign_episode = ATOMIC_VAR_INIT(-1);
 static atomic_int web_online_requested_campaign_seats = ATOMIC_VAR_INIT(0);
 static atomic_int web_online_requested_campaign_pending = ATOMIC_VAR_INIT(0);
+
+/* Hazard Run mission authoring draft (authoring slice 2). The browser
+ * editor stages one mission here through field-wise scalar setters; the
+ * game thread drains it into campaign_mission_author_commit, which owns
+ * the only validator and the only store. Bounds mirror
+ * source/game/campaign_mission.h (version 1, episode 0..7, name 32,
+ * 8 encounters); a refusal at publish means version skew and leaves the
+ * staged draft standing. Only the browser thread mutates staging; only
+ * the game-thread drain reads it, after acquiring the pending word. The
+ * actor type crosses opaquely: hostility is a set in ai/actor_types.h
+ * that this boundary must not mirror, so the engine decides it. */
+enum
+{
+	WEB_MISSION_AUTHOR_NAME_CHARACTERS = 32,
+	WEB_MISSION_AUTHOR_MAX_ENCOUNTERS = 8,
+	WEB_MISSION_AUTHOR_MAX_ACTORS_PER_ENCOUNTER = 16,
+	WEB_MISSION_AUTHOR_NO_ANCHOR = -1,
+};
+
+static atomic_int web_mission_author_staged_valid = ATOMIC_VAR_INIT(0);
+static atomic_int web_mission_author_staged_episode = ATOMIC_VAR_INIT(-1);
+static atomic_int web_mission_author_name_length = ATOMIC_VAR_INIT(0);
+static atomic_int web_mission_author_name[WEB_MISSION_AUTHOR_NAME_CHARACTERS];
+static atomic_int web_mission_author_encounter_count = ATOMIC_VAR_INIT(0);
+static atomic_int web_mission_author_volumes[WEB_MISSION_AUTHOR_MAX_ENCOUNTERS];
+static atomic_int web_mission_author_actors[WEB_MISSION_AUTHOR_MAX_ENCOUNTERS];
+static atomic_int web_mission_author_counts[WEB_MISSION_AUTHOR_MAX_ENCOUNTERS];
+static atomic_int web_mission_author_anchors[WEB_MISSION_AUTHOR_MAX_ENCOUNTERS];
+static atomic_int web_mission_author_commit_pending = ATOMIC_VAR_INIT(0);
+static atomic_int web_mission_author_status = ATOMIC_VAR_INIT(0);
+static atomic_int web_mission_author_recorded = ATOMIC_VAR_INIT(-1);
 
 static struct
 {
@@ -294,6 +339,180 @@ EMSCRIPTEN_KEEPALIVE int platform_web_online_campaign_host_recorded(void)
 	if (episode < 0 || seats <= 0)
 		return -1;
 	return ((int)episode << 8) | (int)seats;
+}
+
+/* Hazard Run mission authoring bridge (authoring slice 2). Field-wise
+ * scalar setters staging one draft; only the game-thread drain saves,
+ * through campaign_mission_author_commit. Every mutating export returns
+ * 1 when published, 0 when refused with the staged draft standing. */
+EMSCRIPTEN_KEEPALIVE int platform_web_campaign_mission_begin(int episode_index)
+{
+	if (episode_index < 0 || episode_index >= 8)
+		return 0;
+	/* Publish the reset first, then release the valid word. The drain
+	acquires valid before reading this mailbox. A new draft supersedes
+	any commit request the drain has not consumed yet. */
+	atomic_store_explicit(
+		&web_mission_author_commit_pending,
+		0,
+		memory_order_relaxed);
+	atomic_store_explicit(
+		&web_mission_author_staged_episode,
+		episode_index,
+		memory_order_relaxed);
+	atomic_store_explicit(
+		&web_mission_author_name_length,
+		0,
+		memory_order_relaxed);
+	atomic_store_explicit(
+		&web_mission_author_encounter_count,
+		0,
+		memory_order_relaxed);
+	atomic_store_explicit(
+		&web_mission_author_staged_valid,
+		1,
+		memory_order_release);
+	return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int platform_web_campaign_mission_set_name_char(
+	int index,
+	int char_code)
+{
+	int length;
+
+	if (!atomic_load_explicit(
+		&web_mission_author_staged_valid,
+		memory_order_acquire))
+	{
+		return 0;
+	}
+	/* Char-slot fidelity, not a content policy: codes cross verbatim and
+	the canonical validator still requires a non-empty name at commit. */
+	if (index < 0 || index >= WEB_MISSION_AUTHOR_NAME_CHARACTERS ||
+		char_code < 0 || char_code > 255)
+	{
+		return 0;
+	}
+	atomic_store_explicit(
+		&web_mission_author_name[index],
+		char_code,
+		memory_order_relaxed);
+	length = atomic_load_explicit(
+		&web_mission_author_name_length,
+		memory_order_relaxed);
+	if (index + 1 > length)
+	{
+		atomic_store_explicit(
+			&web_mission_author_name_length,
+			index + 1,
+			memory_order_relaxed);
+	}
+	return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int platform_web_campaign_mission_add_encounter(
+	int trigger_volume_index,
+	int actor_type,
+	int actor_count,
+	int anchor_index)
+{
+	int slot;
+
+	if (!atomic_load_explicit(
+		&web_mission_author_staged_valid,
+		memory_order_acquire))
+	{
+		return 0;
+	}
+	slot = atomic_load_explicit(
+		&web_mission_author_encounter_count,
+		memory_order_relaxed);
+	if (slot < 0 || slot >= WEB_MISSION_AUTHOR_MAX_ENCOUNTERS)
+		return 0;
+	if (trigger_volume_index < 0 ||
+		actor_count <= 0 ||
+		actor_count > WEB_MISSION_AUTHOR_MAX_ACTORS_PER_ENCOUNTER ||
+		anchor_index < WEB_MISSION_AUTHOR_NO_ANCHOR)
+	{
+		return 0;
+	}
+	atomic_store_explicit(
+		&web_mission_author_volumes[slot],
+		trigger_volume_index,
+		memory_order_relaxed);
+	atomic_store_explicit(
+		&web_mission_author_actors[slot],
+		actor_type,
+		memory_order_relaxed);
+	atomic_store_explicit(
+		&web_mission_author_counts[slot],
+		actor_count,
+		memory_order_relaxed);
+	atomic_store_explicit(
+		&web_mission_author_anchors[slot],
+		anchor_index,
+		memory_order_relaxed);
+	atomic_store_explicit(
+		&web_mission_author_encounter_count,
+		slot + 1,
+		memory_order_relaxed);
+	return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int platform_web_campaign_mission_commit(void)
+{
+	if (!atomic_load_explicit(
+		&web_mission_author_staged_valid,
+		memory_order_acquire))
+	{
+		return 0;
+	}
+	/* Request only: the game-thread drain validates and saves, and the
+	disposition arrives through the status poll below. */
+	atomic_store_explicit(
+		&web_mission_author_commit_pending,
+		1,
+		memory_order_release);
+	return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int platform_web_campaign_mission_reset(void)
+{
+	/* Abandons staging and returns the polls to idle. A commit already
+	draining completes first; the drain re-checks valid after its
+	snapshot and skips a reset draft. */
+	atomic_store_explicit(
+		&web_mission_author_staged_valid,
+		0,
+		memory_order_release);
+	atomic_store_explicit(
+		&web_mission_author_commit_pending,
+		0,
+		memory_order_release);
+	atomic_store_explicit(
+		&web_mission_author_status,
+		0,
+		memory_order_release);
+	return 1;
+}
+
+/* Last drain disposition: 0 idle-or-saved-ok, else the refusing stage
+ * (1 episode, 2 name, 3 encounter, 4 empty draft, 5 store refused). */
+EMSCRIPTEN_KEEPALIVE int platform_web_campaign_mission_status(void)
+{
+	return atomic_load_explicit(
+		&web_mission_author_status,
+		memory_order_acquire);
+}
+
+/* Packed last-saved header (episode << 8) | encounter count, -1 before
+ * the first save. The sole saved proof the editor polls. */
+EMSCRIPTEN_KEEPALIVE int platform_web_campaign_mission_recorded(void)
+{
+	return atomic_load_explicit(
+		&web_mission_author_recorded,
+		memory_order_acquire);
 }
 
 EMSCRIPTEN_KEEPALIVE void platform_web_set_player_magnetism_enabled(int enabled)
@@ -743,6 +962,100 @@ void web_online_ui_update(int main_menu_loaded, float seconds)
 			memory_order_acquire);
 
 		campaign_coop_host_configure(episode, seats);
+	}
+
+	/* Hazard Run mission authoring drain: snapshot the staged scalars,
+	then re-check valid, so a reset that landed mid-snapshot abandons the
+	save and returns the polls to idle instead. */
+	if (atomic_exchange_explicit(
+		&web_mission_author_commit_pending,
+		0,
+		memory_order_acq_rel))
+	{
+		if (atomic_load_explicit(
+			&web_mission_author_staged_valid,
+			memory_order_acquire))
+		{
+			char staged_name[WEB_MISSION_AUTHOR_NAME_CHARACTERS];
+			short staged_volumes[WEB_MISSION_AUTHOR_MAX_ENCOUNTERS];
+			short staged_actors[WEB_MISSION_AUTHOR_MAX_ENCOUNTERS];
+			short staged_counts[WEB_MISSION_AUTHOR_MAX_ENCOUNTERS];
+			short staged_anchors[WEB_MISSION_AUTHOR_MAX_ENCOUNTERS];
+			short staged_episode;
+			short staged_encounters;
+			int slot;
+			int name_length;
+			int disposition;
+			int recorded;
+
+			staged_episode = (short)atomic_load_explicit(
+				&web_mission_author_staged_episode,
+				memory_order_relaxed);
+			staged_encounters = (short)atomic_load_explicit(
+				&web_mission_author_encounter_count,
+				memory_order_relaxed);
+			name_length = atomic_load_explicit(
+				&web_mission_author_name_length,
+				memory_order_relaxed);
+			for (slot = 0; slot < WEB_MISSION_AUTHOR_NAME_CHARACTERS; slot++)
+			{
+				staged_name[slot] = (slot < name_length) ? (char)atomic_load_explicit(
+					&web_mission_author_name[slot],
+					memory_order_relaxed) : '\0';
+			}
+			for (slot = 0; slot < WEB_MISSION_AUTHOR_MAX_ENCOUNTERS; slot++)
+			{
+				staged_volumes[slot] = (short)atomic_load_explicit(
+					&web_mission_author_volumes[slot],
+					memory_order_relaxed);
+				staged_actors[slot] = (short)atomic_load_explicit(
+					&web_mission_author_actors[slot],
+					memory_order_relaxed);
+				staged_counts[slot] = (short)atomic_load_explicit(
+					&web_mission_author_counts[slot],
+					memory_order_relaxed);
+				staged_anchors[slot] = (short)atomic_load_explicit(
+					&web_mission_author_anchors[slot],
+					memory_order_relaxed);
+			}
+
+			if (atomic_load_explicit(
+				&web_mission_author_staged_valid,
+				memory_order_acquire))
+			{
+				disposition = campaign_mission_author_commit(
+					staged_episode,
+					staged_name,
+					staged_volumes,
+					staged_actors,
+					staged_counts,
+					staged_anchors,
+					staged_encounters,
+					&recorded);
+				if (disposition == 0)
+				{
+					atomic_store_explicit(
+						&web_mission_author_recorded,
+						recorded,
+						memory_order_release);
+				}
+			}
+			else
+			{
+				disposition = 0;
+			}
+			atomic_store_explicit(
+				&web_mission_author_status,
+				disposition,
+				memory_order_release);
+		}
+		else
+		{
+			atomic_store_explicit(
+				&web_mission_author_status,
+				0,
+				memory_order_release);
+		}
 	}
 
 	if (command == _web_online_command_cancel)
