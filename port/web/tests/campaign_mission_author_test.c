@@ -249,11 +249,21 @@ int main(void)
 	CHECK(disposition == CAMPAIGN_MISSION_AUTHOR_BAD_ENCOUNTER);
 	CHECK(stub_write_count == writes_before);
 
-	/* Empty draft refuses. */
+	/* Negative count refuses, but work-only E1 commits a zero-hostile record. */
 	disposition = campaign_mission_author_commit(
-		1, name, volumes, actors, counts, anchors, 0, &recorded);
-	CHECK(disposition == CAMPAIGN_MISSION_AUTHOR_EMPTY_DRAFT);
+		1, name, volumes, actors, counts, anchors, -1, &recorded);
+	CHECK(disposition == CAMPAIGN_MISSION_AUTHOR_BAD_ENCOUNTER);
 	CHECK(stub_write_count == writes_before);
+	author_test_fill_name(name, "Routine Call");
+	disposition = campaign_mission_author_commit(
+		0, name, NULL, NULL, NULL, NULL, 0, &recorded);
+	CHECK(disposition == CAMPAIGN_MISSION_AUTHOR_SAVED);
+	CHECK(recorded == 0);
+	CHECK(campaign_mission_load_episode(0, &widened));
+	CHECK(widened.encounter_count == 0);
+	CHECK(campaign_mission_valid(&widened));
+	/* Unused rows are zeroed in the serialized record, never stale hostiles. */
+	CHECK(widened.encounters[0].actor_count == 0);
 
 	/* NULL recorded_out still saves on a green commit. */
 	disposition = campaign_mission_author_commit(

@@ -37,6 +37,10 @@
 #include "game/campaign_coop.h"
 #include "game/campaign_mission.h"
 #include "game/campaign_coop_adapter.h"
+#include "game/campaign_mission_apply.h"
+#include "game/campaign_mission_associate.h"
+#include "scenario/scenario.h"
+#include "scenario/scenario_definitions.h"
 
 /* ---------- link-level stubs: backing store only ---------- */
 
@@ -81,6 +85,22 @@ void *data_iterator_next(
  * round-trip bytes with no filesystem. */
 static unsigned char stub_datastore[sizeof(struct campaign_mission)];
 static long stub_datastore_length = -1;
+static struct scenario *stub_scenario;
+static int stub_tag_reads;
+
+struct scenario *global_scenario_try_and_get(void)
+{
+	return stub_scenario;
+}
+
+void *tag_block_get_element_with_size(const struct tag_block *block,
+	long index, long element_size)
+{
+	stub_tag_reads++;
+	if (!block || index < 0 || index >= block->count || !block->address)
+		return 0;
+	return (unsigned char *)block->address + index * element_size;
+}
 
 boolean datastore_write(
 	const char *file_name,
@@ -330,11 +350,17 @@ int main(
 		CHECK(reloaded.encounters[0].anchor_index == CAMPAIGN_MISSION_NO_ANCHOR);
 
 		/* Invalid records never reach the store; the prior bytes stand. */
-		mission.encounter_count = 0;
+		mission.encounter_count = -1;
 		CHECK(campaign_mission_save("hazard_e1", &mission) == false);
 		mission.encounter_count = 1;
 		CHECK(campaign_mission_load("hazard_e1", &reloaded) == true);
 		CHECK(reloaded.encounter_count == 1);
+
+		/* Work-only E1: zero hostiles saves/loads with no dummy encounter. */
+		mission.encounter_count = 0;
+		CHECK(campaign_mission_save("hazard_e1", &mission) == true);
+		CHECK(campaign_mission_load("hazard_e1", &reloaded) == true);
+		CHECK(reloaded.encounter_count == 0);
 
 		/* Corrupt stores fail closed and leave the out-param alone. */
 		stub_datastore[0] = 0;
@@ -351,6 +377,50 @@ int main(
 		CHECK(campaign_mission_save("hazard_e1", 0) == false);
 		CHECK(campaign_mission_load(0, &reloaded) == false);
 		CHECK(campaign_mission_load("hazard_e1", 0) == false);
+	}
+
+	/* Real production author/save/load/apply/associate path on a selected
+	 * scenario with NO volumes/AI rows. Only backing data is controlled. */
+	{
+		char name[CAMPAIGN_MISSION_NAME_CHARACTERS] = "Routine Call";
+		struct campaign_mission loaded;
+		static struct scenario empty_scenario;
+		struct campaign_mission_apply_report report;
+		int recorded = -1;
+		int16_t bound = -1;
+		int16_t count = -1;
+		CHECK(campaign_mission_author_commit(0, name,
+			0, 0, 0, 0, 0, &recorded) == CAMPAIGN_MISSION_AUTHOR_SAVED);
+		CHECK(recorded == 0);
+		CHECK(campaign_mission_load_episode(0, &loaded));
+		CHECK(loaded.encounter_count == 0);
+		CHECK(loaded.encounters[0].actor_count == 0);
+		CHECK(campaign_mission_activate_bound(0, &report, &bound) ==
+			CAMPAIGN_MISSION_APPLY_REFUSED);
+		stub_scenario = &empty_scenario;
+		CHECK(campaign_mission_activate_bound(0, &report, &bound) == CAMPAIGN_MISSION_APPLY_OK);
+		CHECK(bound == 0);
+		CHECK(report.resolved_count == 0 && report.pending_count == 0);
+		CHECK(campaign_mission_activated()->encounter_count == 0);
+		CHECK(campaign_mission_bound_table(&count) != 0 && count == 0);
+		CHECK(stub_tag_reads == 0);
+		/* A malformed replacement never overwrites the work-only save. */
+		CHECK(campaign_mission_author_commit(0, name,
+			0, 0, 0, 0, -1, &recorded) == CAMPAIGN_MISSION_AUTHOR_BAD_ENCOUNTER);
+		CHECK(campaign_mission_load_episode(0, &loaded) && loaded.encounter_count == 0);
+		/* A valid hostile E2 record still refuses an out-of-range map volume
+		 * and preserves the prior activated work-only mission. */
+		loaded.episode_index = 1;
+		loaded.encounter_count = 1;
+		loaded.encounters[0].trigger_volume_index = 3;
+		loaded.encounters[0].actor_type = _actor_grunt;
+		loaded.encounters[0].actor_count = 1;
+		loaded.encounters[0].anchor_index = CAMPAIGN_MISSION_NO_ANCHOR;
+		CHECK(campaign_mission_save("test_hostile", &loaded));
+		CHECK(campaign_mission_activate_bound(1, &report, &bound) == CAMPAIGN_MISSION_APPLY_REFUSED);
+		CHECK(report.refused_index == 0);
+		CHECK(campaign_mission_activated()->encounter_count == 0);
+		stub_scenario = 0;
 	}
 
 	/* ADAPTER controls (cooperative guest slice): serialized bind,

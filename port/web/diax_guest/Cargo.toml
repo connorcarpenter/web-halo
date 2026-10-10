@@ -1,0 +1,21 @@
+[package]
+name = "halo_diax_guest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+modding_runtime = { path = "../../../../diax/crates/modding/runtime" }
+modding_abi = { path = "../../../../diax/crates/modding/abi" }
+
+[dev-dependencies]
+wat = "1"
+
+[profile.release]
+panic = "abort"
+

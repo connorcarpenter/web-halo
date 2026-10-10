@@ -42,11 +42,15 @@ regen="sh configure.sh --web --sdk $(sq "$emsdk") --web-cc $(sq "$web_cc")"
 if $release; then regen+=' --release'; fi
 if [[ -n $launcher ]]; then regen+=" --compiler-launcher $(sq "$launcher")"; fi
 printf 'rule configure_web\n  command = %s\n  generator = 1\n  description = CONFIGURE browser\n' "$(literal "$regen")"
-regen_inputs=(configure.sh tools/web_build.sh tools/linux_msvc_semantics.mjs config/config.json port/linux/port.json port/web/src port/linux/src port/linux/game source/game port/include/xdk)
+regen_inputs=(configure.sh tools/web_build.sh tools/diax_guest_build.sh tools/linux_msvc_semantics.mjs config/config.json port/linux/port.json port/web/src port/web/diax_guest/src port/linux/src port/linux/game source/game port/include/xdk)
 if [[ -d port/web/assets ]]; then regen_inputs+=(port/web/assets); fi
 edge build.ninja configure_web "${regen_inputs[@]}"
 printf 'rule web_sdl\n  command = bash tools/web_sdl.sh --sdk %s\n  description = WEB SDL 3.4.16\n' "$(literal "$(sq "$emsdk")")"
 edge build/web/sdl-install/lib/libSDL3.a web_sdl tools/web_sdl.sh build/native-deps/SDL-release-3.4.16/CMakeLists.txt build/native-deps/SDL-release-3.4.16/include/SDL3/SDL_version.h
+diax_archive=build/diax-guest/wasm32-unknown-emscripten/release/libhalo_diax_guest.a
+printf 'rule web_diax_guest\n  command = bash tools/diax_guest_build.sh --sdk %s\n  description = WEB DIAX GUEST\n  depfile = build/diax-guest/wasm32-unknown-emscripten/release/libhalo_diax_guest.d\n' "$(literal "$(sq "$emsdk")")
+mapfile -d '' -t diax_sources < <(find port/web/diax_guest/src -type f -name '*.rs' -print0 | sort -z)
+edge "$diax_archive" web_diax_guest tools/diax_guest_build.sh port/web/diax_guest/Cargo.toml port/web/diax_guest/Cargo.lock port/web/diax_guest/diax-main.pin "${diax_sources[@]}"
 printf '%s\n' 'rule web_msvc_semantics' '  command = node tools/linux_msvc_semantics.mjs --output $out $scan' '  description = WEB MSVC SEMANTICS $out' '  restat = 1'
 mapfile -d '' -t sdk_headers < <(find "$sdk" -maxdepth 1 -type f -name '*.h' -print0 | sort -z)
 mapfile -d '' -t game_headers < <(find source -type f \( -name '*.c' -o -name '*.h' \) -print0 | sort -z)
@@ -97,9 +101,10 @@ add_object port/third_party/kcp/ikcp.c "$abi -std=gnu11 -w"
 while IFS= read -r -d '' source; do add_object "$source" "$abi -std=gnu11 -w -Iport/third_party/musl-math/include -include port/third_party/musl-math/include/libm.h" musl-math/; done < <(find port/third_party/musl-math/src -maxdepth 1 -type f -name '*.c' -print0 | sort -z)
 printf 'build build/web/halo.html | build/web/halo.js build/web/halo.wasm: web_link'
 for object in "${objects[@]}"; do printf ' %s' "$(np "$object")"; done
-printf ' | build/web/sdl-install/lib/libSDL3.a port/web/shell.html port/web/xiso.js port/web/fetch_path_normalization.js port/web/online_client.js port/web/library_web_transport.js\n'
+printf ' | build/web/sdl-install/lib/libSDL3.a %s port/web/shell.html port/web/xiso.js port/web/fetch_path_normalization.js port/web/online_client.js port/web/library_web_transport.js\n' "$diax_archive"
 printf '  ldflags = -O2 %s -pthread %s -sPROXY_TO_PTHREAD=1 -sPTHREAD_POOL_SIZE=16 -sOFFSCREENCANVAS_SUPPORT=1 -sOFFSCREENCANVASES_TO_PTHREAD=#canvas -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sFULL_ES3=1 -sGL_ENABLE_GET_PROC_ADDRESS=1 -sWASMFS=1 -sFORCE_FILESYSTEM=1 -sINITIAL_MEMORY=2415919104 -sMAXIMUM_MEMORY=4294967296 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=5242880 -sDEFAULT_PTHREAD_STACK_SIZE=2097152 -sEXIT_RUNTIME=0 -sASSERTIONS=%s -sENVIRONMENT=web,worker -sERROR_ON_UNDEFINED_SYMBOLS=1 --shell-file port/web/shell.html --pre-js port/web/xiso.js --pre-js port/web/fetch_path_normalization.js --pre-js port/web/online_client.js\n' "$debug" "$sdl" "$assertions"
-printf '%s\n' '  libs = build/web/sdl-install/lib/libSDL3.a -lfetchfs.js -lopfs.js --js-library port/web/library_web_transport.js' 'rule web_copy_asset' '  command = mkdir -p "$$(dirname "$out")" && cp -p "$in" "$out"' '  description = WEB ASSET $out'
+printf '  libs = %s build/web/sdl-install/lib/libSDL3.a -lfetchfs.js -lopfs.js --js-library port/web/library_web_transport.js\n' "$diax_archive"
+printf '%s\n' 'rule web_copy_asset' '  command = mkdir -p "$$(dirname "$out")" && cp -p "$in" "$out"' '  description = WEB ASSET $out'
 assets=()
 while IFS= read -r -d '' source; do output="build/web/${source#port/web/}"; assets+=("$output"); edge "$output" web_copy_asset "$source"; done < <(if [[ -d port/web/assets ]]; then find port/web/assets -type f -print0 | sort -z; fi)
 edge web phony build/web/halo.html build/web/halo.js build/web/halo.wasm "${assets[@]}"

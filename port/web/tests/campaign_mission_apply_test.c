@@ -122,9 +122,16 @@ int main(
 		CAMPAIGN_MISSION_APPLY_REFUSED);
 	CHECK(report.refused_index == 0);
 
-	/* REFUSAL: malformed records never reach volume resolution. */
+	/* Work-only missions require no hostile volume and resolve zero rows. */
 	make_mission(&mission);
 	mission.encounter_count = 0;
+	CHECK(campaign_mission_resolve(&mission, 0, &report) == CAMPAIGN_MISSION_APPLY_OK);
+	CHECK(report.resolved_count == 0);
+	CHECK(report.pending_count == 0);
+	CHECK(report.refused_index == -1);
+
+	/* REFUSAL: malformed records never reach volume resolution. */
+	mission.encounter_count = -1;
 	CHECK(campaign_mission_resolve(&mission, 4, &report) ==
 		CAMPAIGN_MISSION_APPLY_REFUSED);
 	make_mission(&mission);

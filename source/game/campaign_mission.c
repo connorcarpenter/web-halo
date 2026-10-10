@@ -66,7 +66,7 @@ int campaign_mission_author_commit(
 	int16_t encounter_count,
 	int *recorded_out)
 {
-	struct campaign_mission staged;
+	struct campaign_mission staged = {0};
 	/* "hazard_mission_" plus one episode digit plus the terminator. */
 	char field[sizeof(CAMPAIGN_MISSION_DATASTORE_FIELD_PREFIX) + 1];
 	int16_t encounter;
@@ -79,11 +79,10 @@ int campaign_mission_author_commit(
 	}
 	if (!mission_name || mission_name[0] == '\0')
 		return CAMPAIGN_MISSION_AUTHOR_BAD_NAME;
-	if (!trigger_volumes || !actor_types || !actor_counts || !anchors)
+	if (encounter_count > 0 &&
+		(!trigger_volumes || !actor_types || !actor_counts || !anchors))
 		return CAMPAIGN_MISSION_AUTHOR_BAD_ENCOUNTER;
-	if (encounter_count <= 0)
-		return CAMPAIGN_MISSION_AUTHOR_EMPTY_DRAFT;
-	if (encounter_count > CAMPAIGN_MISSION_MAX_ENCOUNTERS)
+	if (encounter_count < 0 || encounter_count > CAMPAIGN_MISSION_MAX_ENCOUNTERS)
 		return CAMPAIGN_MISSION_AUTHOR_BAD_ENCOUNTER;
 
 	staged.version = CAMPAIGN_MISSION_VERSION;

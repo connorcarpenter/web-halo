@@ -1098,9 +1098,9 @@
       }
     }
     var encounters = source.encounters;
-    if (!Array.isArray(encounters) || encounters.length < 1 ||
+    if (!Array.isArray(encounters) ||
         encounters.length > CAMPAIGN_MISSION_MAX_ENCOUNTERS) {
-      throw new Error("Mission encounters must list 1–8 encounters.");
+      throw new Error("Mission encounters must list 0–8 encounters.");
     }
     return {
       version: CAMPAIGN_MISSION_VERSION,
@@ -1373,7 +1373,6 @@
   function initializeMissionEditor() {
     if (!elements.missionEncounters || !elements.missionAddEncounter ||
         !elements.missionSave || typeof document.createElement !== "function") return;
-    if (missionEncounterRows().length === 0) addMissionEncounterRow();
     elements.missionAddEncounter.addEventListener("click", function() {
       addMissionEncounterRow();
     });

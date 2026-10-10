@@ -234,7 +234,7 @@ function expectedCalls(mission) {
     [{ name: 'Ābc', episodeIndex: 0, encounters: [validMission().encounters[0]] }, /name|byte|char/i],
     [{ name: 'Nope', episodeIndex: -1, encounters: [validMission().encounters[0]] }, /episode/i],
     [{ name: 'Nope', episodeIndex: 8, encounters: [validMission().encounters[0]] }, /episode/i],
-    [{ name: 'Nope', episodeIndex: 0, encounters: [] }, /encounter/i],
+    [{ name: 'Nope', episodeIndex: 0, encounters: null }, /encounter/i],
     [{ name: 'Nope', episodeIndex: 0, encounters: new Array(9).fill(validMission().encounters[0]) }, /encounter/i],
     [{ name: 'Nope', episodeIndex: 0, encounters: [{ triggerVolumeIndex: -1, actorType: 0, actorCount: 1, anchorIndex: -1 }] }, /volume/i],
     [{ name: 'Nope', episodeIndex: 0, encounters: [{ triggerVolumeIndex: 0, actorType: 6, actorCount: 1, anchorIndex: -1 }] }, /actor/i],
@@ -352,7 +352,15 @@ function expectedCalls(mission) {
     field(row, 'mission-anchor').value = String(anchor);
   }
 
-  /* The editor opens with one default encounter row at canonical defaults. */
+  /* E1 opens without hostiles. Work-only saves stage no encounter call. */
+  assert.equal(encounters().length, 0);
+  missionCalls.length = 0;
+  const workOnly = { name: 'Routine Call', episodeIndex: 0, encounters: [] };
+  context.HaloOnline.missionSave(workOnly);
+  assert.deepEqual(missionCalls, expectedCalls(workOnly));
+  assert.equal(missionCalls.some(call => call[0] === 'encounter'), false);
+  click('online-mission-add-encounter');
+  /* Explicitly adding a hostile uses the existing canonical defaults. */
   assert.equal(encounters().length, 1);
   assert.equal(field(encounters()[0], 'mission-volume').value, '0');
   assert.equal(field(encounters()[0], 'mission-actor').value, '0');

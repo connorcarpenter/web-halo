@@ -28,8 +28,8 @@ enum
 	/* Mission record version; bump when the struct changes. */
 	CAMPAIGN_MISSION_VERSION = 1,
 
-	/* Corridor-to-room episode shape (E1 shipboard default): at most this
-	 * many encounters per mission. */
+	/* At most this many hostile encounters. Work-only missions use zero;
+	 * their cooperative objectives execute in the GameMode guest. */
 	CAMPAIGN_MISSION_MAX_ENCOUNTERS = 8,
 
 	/* Room-scale encounter cap. */
@@ -73,8 +73,8 @@ struct campaign_mission
 #define CAMPAIGN_MISSION_DATASTORE_FILE "hazard_missions"
 #define CAMPAIGN_MISSION_DATASTORE_FIELD_PREFIX "hazard_mission_"
 
-/* Hazard Run hostiles: covenant boarders for the shipboard episodes and
- * swarm forms for the later ones. Allies, neutrals, and props
+/* Legacy engine hostile classifications, pending original archetype binding.
+ * Allies, neutrals, and props
  * (player/marine/crew/monitor/sentinel/mounted_weapon/engineer/assassin)
  * are refused by mode validation. Static inline with the validator so
  * both stay the same bytes everywhere. */
@@ -114,7 +114,7 @@ static inline bool campaign_mission_valid(
 		return false;
 	if (mission->name[0] == '\0')
 		return false;
-	if (mission->encounter_count <= 0 ||
+	if (mission->encounter_count < 0 ||
 		mission->encounter_count > CAMPAIGN_MISSION_MAX_ENCOUNTERS)
 		return false;
 

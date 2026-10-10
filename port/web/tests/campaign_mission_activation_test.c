@@ -320,6 +320,30 @@ int main(void)
 	CHECK(campaign_mission_activate_bound(-1, &report, &bound) ==
 		CAMPAIGN_MISSION_APPLY_REFUSED);
 
+	/* Work-only E1 saves, reloads and activates with no AI rows/bindings.
+	 * A selected scenario is still mandatory. No hostile sentinel is added. */
+	{
+		char work_name[CAMPAIGN_MISSION_NAME_CHARACTERS];
+		int recorded = -1;
+		activation_fill_name(work_name, "Routine Call");
+		CHECK(campaign_mission_author_commit(0, work_name,
+			NULL, NULL, NULL, NULL, 0, &recorded) == CAMPAIGN_MISSION_AUTHOR_SAVED);
+		CHECK(recorded == 0);
+		CHECK(campaign_mission_load_episode(0, &loaded));
+		CHECK(loaded.encounter_count == 0);
+		global_scenario = NULL;
+		CHECK(campaign_mission_activate_bound(0, &report, &bound) ==
+			CAMPAIGN_MISSION_APPLY_REFUSED);
+		CHECK(campaign_mission_activated()->episode_index == 3);
+		memset(&canned_scenario, 0, sizeof(canned_scenario));
+		global_scenario = &canned_scenario;
+		CHECK(campaign_mission_activate_bound(0, &report, &bound) == CAMPAIGN_MISSION_APPLY_OK);
+		CHECK(bound == 0);
+		CHECK(report.resolved_count == 0 && report.pending_count == 0);
+		CHECK(campaign_mission_activated()->encounter_count == 0);
+		CHECK(campaign_mission_bound_table(&table_count) != NULL);
+		CHECK(table_count == 0);
+	}
 	global_scenario = NULL;
 
 	if (check_failures == 0)
