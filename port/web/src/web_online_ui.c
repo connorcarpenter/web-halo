@@ -52,6 +52,12 @@ unsigned char player_ui_configure_network_server_game_advanced(
 	unsigned char invisible_players,
 	unsigned char other_players_on_radar);
 void game_connection_set(short connection);
+/* Hazard Run campaign host record (source/game/campaign_coop.c). Byte
+ * boolean and short scalars, matching the game's ABI at this boundary. */
+unsigned char campaign_coop_host_configure(short episode_index, short seat_count);
+unsigned char campaign_coop_session_full(void);
+short campaign_coop_host_episode(void);
+short campaign_coop_host_cap(void);
 void main_goto_main_menu(void);
 short network_game_client_get_state(struct network_game_client *client, short *state_data);
 short network_game_client_get_error(struct network_game_client *client);
@@ -125,6 +131,15 @@ static atomic_uint web_online_customization_sequence = ATOMIC_VAR_INIT(0);
 static atomic_int web_online_requested_color = ATOMIC_VAR_INIT(0);
 static atomic_int web_online_requested_name[WEB_ONLINE_PLAYER_NAME_CHARACTERS];
 static unsigned int web_online_applied_customization_sequence;
+
+/* Hazard Run (Vehicle A, slice 3) campaign host handoff. The browser lobby
+ * publishes (episode, seats) here; the game thread drains the pending word
+ * in web_online_ui_update into the engine host record. Value ranges mirror
+ * the engine contract (CAMPAIGN_COOP_EPISODE_COUNT == 8, seats 1..4) so a
+ * refusal at either layer means version skew, never a valid lobby choice. */
+static atomic_int web_online_requested_campaign_episode = ATOMIC_VAR_INIT(-1);
+static atomic_int web_online_requested_campaign_seats = ATOMIC_VAR_INIT(0);
+static atomic_int web_online_requested_campaign_pending = ATOMIC_VAR_INIT(0);
 
 static struct
 {
@@ -227,6 +242,58 @@ EMSCRIPTEN_KEEPALIVE int platform_web_online_host_advanced_configured(
 			WEB_ONLINE_REQUEST_ADVANCED_BIT,
 		memory_order_release);
 	return 1;
+}
+
+/* Hazard Run (Vehicle A, slice 3) campaign host handoff, the sibling of
+ * platform_web_online_host_configured for the four-seat co-op campaign.
+ * The browser lobby calls this with its configured episode (0-based) and
+ * seat count; the game thread drains the mailbox into the engine host
+ * record, which binds the episode the next map-load form carries and arms
+ * the admit cap the server path enforces. Returns 1 when the handoff is
+ * published, 0 when out of range (never committed, prior record stands). */
+EMSCRIPTEN_KEEPALIVE int platform_web_online_campaign_host_configured(
+	int episode_index,
+	int seat_count)
+{
+	if (episode_index < 0 || episode_index >= 8 ||
+		seat_count < 1 || seat_count > 4)
+	{
+		return 0;
+	}
+	/* Publish the values first, then release the pending word. The game
+	thread acquires pending before reading this mailbox. */
+	atomic_store_explicit(
+		&web_online_requested_campaign_episode,
+		episode_index,
+		memory_order_relaxed);
+	atomic_store_explicit(
+		&web_online_requested_campaign_seats,
+		seat_count,
+		memory_order_relaxed);
+	atomic_store_explicit(
+		&web_online_requested_campaign_pending,
+		1,
+		memory_order_release);
+	return 1;
+}
+
+/* Latched campaign session_full for the lobby to poll: 1 once a join was
+ * refused at the armed host cap, until the next admission or reconfigure. */
+EMSCRIPTEN_KEEPALIVE int platform_web_online_campaign_session_full(void)
+{
+	return campaign_coop_session_full() ? 1 : 0;
+}
+
+/* Recorded host handoff for the lobby to read back: (episode << 8) | seats
+ * once the game thread has drained a configuration, -1 before that. */
+EMSCRIPTEN_KEEPALIVE int platform_web_online_campaign_host_recorded(void)
+{
+	short episode = campaign_coop_host_episode();
+	short seats = campaign_coop_host_cap();
+
+	if (episode < 0 || seats <= 0)
+		return -1;
+	return ((int)episode << 8) | (int)seats;
 }
 
 EMSCRIPTEN_KEEPALIVE void platform_web_set_player_magnetism_enabled(int enabled)
@@ -658,6 +725,25 @@ void web_online_ui_update(int main_menu_loaded, float seconds)
 	/* Browser calls only publish atomics.  Apply the selected identity here,
 	 * before host/join can build its network_player from the active profile. */
 	apply_requested_player_customization();
+
+	/* Hazard Run campaign host handoff: drain the lobby mailbox into the
+	 * engine host record. Both layers validate the same ranges, so a drain
+	 * refusal means version skew; the pending word is still consumed, so a
+	 * stale handoff can never apply to a later session. */
+	if (atomic_exchange_explicit(
+		&web_online_requested_campaign_pending,
+		0,
+		memory_order_acq_rel))
+	{
+		short episode = (short)atomic_load_explicit(
+			&web_online_requested_campaign_episode,
+			memory_order_acquire);
+		short seats = (short)atomic_load_explicit(
+			&web_online_requested_campaign_seats,
+			memory_order_acquire);
+
+		campaign_coop_host_configure(episode, seats);
+	}
 
 	if (command == _web_online_command_cancel)
 	{
