@@ -1,19 +1,26 @@
-/* Host-side unit for the Hazard Run mission authoring commit
- * (source/game/campaign_mission.c). Compiles the real unit against
- * link-level datastore stubs keyed by field, so per-episode separation
- * and store-untouched-on-refusal are actually verified. game/campaign_coop.h
- * and ai/actor_types.h are real headers (include roots below); the ABI
- * typedefs keep the port stdio redirection out, as in the sibling TU. */
+/* Hazard Run mission authoring commit (Vehicle A, authoring slice 2).
+ *
+ * NATIVE-TOOLCHAIN ONLY. Do not build this file with the host gcc: it
+ * compiles the UNMODIFIED source/game/campaign_mission.c, whose engine
+ * headers (cseries/cseries.h, tag_files/files.h) need the native DAG
+ * header closure, as in the sibling campaign_coop_native_controls_test.c.
+ * Only the backing store is stubbed at link level -- the field-keyed
+ * datastore_write/datastore_read below -- so per-episode separation and
+ * store-untouched-on-refusal are actually verified against the real
+ * commit path, including the NULL-array refusal.
+ *
+ * Native DAG shape (tooling owner wires this): one TU .o per test .c. */
 
 #include <stdio.h>
 #include <string.h>
 
-/* Native DAG shape (tooling owner wires this): one TU .o per test .c. */
-typedef unsigned char byte;
-typedef int boolean;
-typedef unsigned char bool;
-#define true 1
-#define false 0
+/* The game-lib build puts port/linux/include/stdio.h first, which redirects
+ * printf/fprintf to halo_linux_printf/halo_linux_fprintf (implemented in
+ * msvc_crt.c, outside the controls link). Test reporting is not game
+ * behavior, so use the host libc printers instead; production bytes are
+ * unaffected. */
+#undef printf
+#undef fprintf
 
 #include "game/campaign_mission.c"
 
@@ -46,7 +53,7 @@ static int stub_find_field(const char *field_name)
 	return -1;
 }
 
-int datastore_write(
+boolean datastore_write(
 	const char *file_name,
 	const char *field_name,
 	long length,
@@ -74,7 +81,7 @@ int datastore_write(
 	return 1;
 }
 
-int datastore_read(
+boolean datastore_read(
 	const char *file_name,
 	const char *field_name,
 	long length,
@@ -195,7 +202,7 @@ int main(void)
 	CHECK(disposition == CAMPAIGN_MISSION_AUTHOR_BAD_NAME);
 	CHECK(stub_write_count == writes_before);
 
-	/* Bad encounters refuse: non-hostile, counts, volume, anchor. */
+	/* Bad encounters refuse: non-hostile, counts, volume, anchor, NULL array. */
 	author_test_fill_name(name, "E1 Canyon Watch");
 	actors[0] = AUTHOR_TEST_PLAYER;
 	disposition = campaign_mission_author_commit(
@@ -225,7 +232,7 @@ int main(void)
 	CHECK(disposition == CAMPAIGN_MISSION_AUTHOR_BAD_ENCOUNTER);
 	anchors[0] = -1;
 	disposition = campaign_mission_author_commit(
-		1, name, NULL, counts, anchors, 1, &recorded);
+		1, name, volumes, NULL, counts, anchors, 1, &recorded);
 	CHECK(disposition == CAMPAIGN_MISSION_AUTHOR_BAD_ENCOUNTER);
 	CHECK(stub_write_count == writes_before);
 
