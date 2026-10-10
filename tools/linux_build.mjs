@@ -132,6 +132,17 @@ export function generate(options, args = []) {
     });
     n.rule('native_control_run', { command: '$in', description: 'RUN campaign native controls' });
     n.build('campaign-native-controls', 'native_control_run', ['build/linux/campaign_coop_native_controls']);
+    const applyControl = 'port/web/tests/campaign_mission_apply_test.c';
+    if (fs.existsSync(applyControl)) {
+      const applyObject = 'build/linux/obj/port/web/tests/campaign_mission_apply_test.o';
+      n.build(applyObject, 'linux_cc', [applyControl], [], {
+        cflags: flags(['--target=i686-linux-gnu', '-m32', '-std=gnu11', '-Isource', ...lto]),
+      });
+      n.build('build/linux/campaign_mission_apply_controls', 'native_control_link', [applyObject, 'build/linux/obj/source/game/campaign_mission_apply.o'], [], {
+        ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, ...(lto.length ? [options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld'] : [])]),
+      });
+      n.build('campaign-apply-controls', 'native_control_run', ['build/linux/campaign_mission_apply_controls']);
+    }
     const authorControl = 'port/web/tests/campaign_mission_author_test.c';
     if (fs.existsSync(authorControl)) {
       const authorObject = 'build/linux/obj/port/web/tests/campaign_mission_author_test.o';
