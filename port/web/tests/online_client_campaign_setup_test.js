@@ -69,6 +69,7 @@ const socketMessages = [];
 const intervals = new Map();
 let nextTimer = 1;
 let gameState = 2;
+let sessionFull = 0;
 let fetchCount = 0;
 let latestSocket = null;
 
@@ -148,6 +149,7 @@ const context = {
       campaignHosts.push([episodeIndex, seatCount]);
       return 1;
     },
+    _platform_web_online_campaign_session_full: () => sessionFull,
     _platform_web_online_host_configured: (mapIndex, modeIndex) => {
       configuredHosts.push([mapIndex, modeIndex]);
       return 1;
@@ -194,7 +196,7 @@ vm.runInContext(
     context.HaloOnline.campaignHost({ episodeIndex: -1, seatCount: 4 }),
     /episode/i);
   await assert.rejects(
-    context.HaloOnline.campaignHost({ episodeIndex: 256, seatCount: 4 }),
+    context.HaloOnline.campaignHost({ episodeIndex: 8, seatCount: 4 }),
     /episode/i);
   assert.equal(fetchCount, 0);
   assert.deepEqual(campaignHosts, []);
@@ -241,13 +243,23 @@ vm.runInContext(
   assert.equal(elements['player-count']['aria-label'],
     'Players in campaign session: 3 of 4 seats');
 
-  gameState = 3;
+  /* The game never leaves IDLE for a campaign lobby (no multiplayer state
+     machine is engaged); the lobby polls the latched admit-cap refusal. */
+  gameState = 0;
   const gamePoll = Array.from(intervals.values()).find(
     timer => timer.milliseconds === 200);
   assert(gamePoll, 'game-state polling was not started');
   gamePoll.callback();
+  assert.equal(elements.online.textContent, 'Campaign room open');
   assert.match(elements['online-status'].textContent,
-    /Episode 3 · 4 seats is ready/);
+    /Episode 3 · 4 seats — the room is open/);
+
+  sessionFull = 1;
+  gamePoll.callback();
+  assert.equal(elements.online.textContent, 'Campaign session full');
+  assert.match(elements['online-status'].textContent,
+    /Episode 3 · 4 seats is full/);
+  sessionFull = 0;
 
   /* Leaving a campaign room restores the idle roster; MP hosting is intact. */
   await context.HaloOnline.leave();

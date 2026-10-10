@@ -55,11 +55,12 @@
   });
 
   var COMMAND = Object.freeze({ HOST: 1, JOIN: 2, CANCEL: 3 });
-  /* Hazard Run campaign contract (Finn, slice 1): seats are 1..4, published
+  /* Hazard Run campaign contract (Finn, slice 3): seats are 1..4, published
      from the admitted roster, never from a local counter. Episodes are a bare
-     zero-based index until the content catalog lands; labels are derived. */
+     zero-based index, episode 1 == 0, bounded by CAMPAIGN_COOP_EPISODE_COUNT
+     == 8; labels are derived until the content catalog lands. */
   var CAMPAIGN_MAX_SEATS = 4;
-  var CAMPAIGN_MAX_EPISODE_INDEX = 255;
+  var CAMPAIGN_MAX_EPISODE_INDEX = 7;
   var GAME_STATE = Object.freeze({
     IDLE: 0,
     WAITING: 1,
@@ -1009,6 +1010,28 @@
       settings.seatCount);
     if (!accepted) {
       throw new Error("Halo could not accept those campaign settings.");
+    }
+  }
+
+  function campaignLobbyFull() {
+    return wasmFunction("platform_web_online_campaign_session_full")() === 1;
+  }
+
+  /* Campaign lobbies never engage the multiplayer state machine (the game
+     thread drains the handoff and the episode binds at map load), so the game
+     stays IDLE while the room is open. Poll the latched admit-cap refusal
+     instead of game states; the recorded-handoff readback stays a diagnostic
+     for the integrator (at IDLE a -1 cannot distinguish pre-drain transient
+     from skew, and HOSTING is unreachable through browser paths). */
+  function pollCampaignLobby() {
+    if (campaignLobbyFull()) {
+      setHeader("Campaign session full", "connected");
+      setStatus(campaignSettingsLabel() +
+        " is full — the session admits no more players.");
+    } else {
+      setHeader("Campaign room open", "waiting");
+      setStatus(campaignSettingsLabel() +
+        " — the room is open and the episode binds when Halo loads it.");
     }
   }
 
@@ -1962,6 +1985,10 @@
       return;
     }
     if (session.role === "host") {
+      if (session.campaign) {
+        pollCampaignLobby();
+        return;
+      }
       if (state === GAME_STATE.HOSTING) {
         if (!session.hostWasReady) showInvite();
         session.hostWasReady = true;
