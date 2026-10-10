@@ -42,7 +42,9 @@ regen="sh configure.sh --web --sdk $(sq "$emsdk") --web-cc $(sq "$web_cc")"
 if $release; then regen+=' --release'; fi
 if [[ -n $launcher ]]; then regen+=" --compiler-launcher $(sq "$launcher")"; fi
 printf 'rule configure_web\n  command = %s\n  generator = 1\n  description = CONFIGURE browser\n' "$(literal "$regen")"
-edge build.ninja configure_web configure.sh tools/web_build.sh tools/linux_msvc_semantics.mjs config/config.json port/linux/port.json port/web/src port/web/assets port/linux/src port/linux/game source/game port/include/xdk
+regen_inputs=(configure.sh tools/web_build.sh tools/linux_msvc_semantics.mjs config/config.json port/linux/port.json port/web/src port/linux/src port/linux/game source/game port/include/xdk)
+if [[ -d port/web/assets ]]; then regen_inputs+=(port/web/assets); fi
+edge build.ninja configure_web "${regen_inputs[@]}"
 printf 'rule web_sdl\n  command = bash tools/web_sdl.sh --sdk %s\n  description = WEB SDL 3.4.16\n' "$(literal "$(sq "$emsdk")")"
 edge build/web/sdl-install/lib/libSDL3.a web_sdl tools/web_sdl.sh build/native-deps/SDL-release-3.4.16/CMakeLists.txt build/native-deps/SDL-release-3.4.16/include/SDL3/SDL_version.h
 printf '%s\n' 'rule web_msvc_semantics' '  command = node tools/linux_msvc_semantics.mjs --output $out $scan' '  description = WEB MSVC SEMANTICS $out' '  restat = 1'
