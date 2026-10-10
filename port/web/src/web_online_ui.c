@@ -80,7 +80,7 @@ unsigned char network_game_client_add_player(struct network_game_client *client,
 unsigned char network_game_client_has_local_player(
 	struct network_game_client *client,
 	short local_player_index);
-void platform_log(const char *format, ...);
+#include "halo_platform_log.h"
 
 enum
 {

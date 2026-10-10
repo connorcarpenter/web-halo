@@ -32,7 +32,7 @@ the SDK headers are read, exactly as game code sees them. */
 /* ---------- logging */
 
 /* prints "halo-linux: <message>" to stderr */
-void platform_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
+#include "halo_platform_log.h"
 
 /* reports an SDK entry point the Linux port does not implement, once per
 name; the caller then behaves as a failing or empty call */

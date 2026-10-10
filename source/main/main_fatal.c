@@ -71,6 +71,7 @@ dependencies are identical.
 
 #ifdef HALO_WEB
 #include <emscripten/emscripten.h>
+#include "halo_platform_log.h"
 #include "../../port/web/src/web_online_ui.h"
 #endif
 
