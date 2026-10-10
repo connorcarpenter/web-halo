@@ -98,6 +98,7 @@ symbols in this file:
 #include "cseries_windows.h"
 #include "real_math.h"
 #include "console.h"
+#include "game/campaign_coop.h"
 #include "game_state.h"
 #include "game.h"
 #include "tag_files.h"
@@ -278,7 +279,11 @@ void game_state_initialize_for_new_map(
 	strcpy(game_state_globals.header->map_name, name);
 	strcpy(game_state_globals.header->build_number, "01.01.14.2342");
 
-	game_state_globals.header->player_count = player_spawn_count;
+	/* Hazard Run (Vehicle A, slice 2): the header records the whole campaign
+	 * roster, not the local creation count. All-local rosters commit totals
+	 * equal to player_spawn_count, so solo and two-player saves are byte-
+	 * identical to before. */
+	game_state_globals.header->player_count = campaign_coop_total_seats();
 	game_state_globals.header->difficulty = game_difficulty_level_get();
 	game_state_globals.header->cache_file_checksum = cache_files_get_checksum();
 	game_state_globals.header->allocation_size_checksum = game_state_globals.allocation_size_checksum;
@@ -324,7 +329,7 @@ void game_state_revert(
 void game_state_save_to_persistent_storage(
 	void)
 {
-	if (player_spawn_count==1)
+	if (campaign_coop_total_seats()==1)
 	{
 		game_state_revert();
 		game_state_write_to_persistent_storage(
@@ -450,7 +455,7 @@ static boolean code_001af4f0(
 				csprintf(temporary, "allocation checksum mismatch"));
 		}
 	}
-	else if (header->player_count != player_spawn_count)
+	else if (header->player_count != campaign_coop_total_seats())
 	{
 		if (halt_on_error)
 		{
@@ -458,7 +463,7 @@ static boolean code_001af4f0(
 				"c:\\halo\\SOURCE\\saved games\\game_state.c",
 				417,
 				FALSE,
-				csprintf(temporary, "expected #%d players but got #%d", player_spawn_count, header->player_count));
+				csprintf(temporary, "expected #%d players but got #%d", campaign_coop_total_seats(), header->player_count));
 		}
 	}
 	else if (header->cache_file_checksum != cache_files_get_checksum())
