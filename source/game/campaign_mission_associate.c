@@ -8,6 +8,7 @@
 #include "game/campaign_mission.h"
 #include "game/campaign_mission_associate.h"
 #include "game/campaign_mission_apply.h"
+#include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "ai/ai_scenario_definitions.h"
 #include "tag_files/tag_groups.h"
