@@ -215,7 +215,7 @@ void system_exit(long code);
 extern __thread boolean display_assert_skipped;
 #endif
 
-/* ---------- prototypes/MAIN.C */
+/* ---------- prototypes/MAIN_FATAL.C */
 
 void halt_and_catch_fire(void);
 
