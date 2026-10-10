@@ -36,6 +36,7 @@
 #include "game/players.h"
 #include "game/campaign_coop.h"
 #include "game/campaign_mission.h"
+#include "game/campaign_coop_adapter.h"
 
 /* ---------- link-level stubs: backing store only ---------- */
 
@@ -116,6 +117,69 @@ boolean datastore_read(
 	for (i = 0; i < length; i++)
 		bytes[i] = stub_datastore[i];
 	return TRUE;
+}
+
+/* ---------- adapter guest-slot stubs: guest behavior only ---------- */
+
+static int32_t stub_adapter_abi = 7;
+static int stub_adapter_init_calls;
+static int stub_adapter_init_fail;
+static int stub_adapter_event_fail;
+static int stub_adapter_restore_fail;
+
+static int32_t stub_adapter_abi_version(
+	void)
+{
+	return stub_adapter_abi;
+}
+
+static int stub_adapter_init(
+	const uint8_t *params_in,
+	int32_t params_len)
+{
+	(void)params_in;
+	(void)params_len;
+	stub_adapter_init_calls++;
+	return stub_adapter_init_fail ? 1 : 0;
+}
+
+static int stub_adapter_handle(
+	const uint8_t *event_in,
+	int32_t event_len,
+	uint8_t *action_out,
+	int32_t action_capacity)
+{
+	int32_t i;
+
+	if (stub_adapter_event_fail)
+		return -1;
+	if (event_len > action_capacity)
+		return -1;
+	for (i = 0; i < event_len; i++)
+		action_out[i] = event_in[i];
+	return event_len;
+}
+
+static int stub_adapter_capture(
+	uint8_t *image_out,
+	int32_t image_capacity)
+{
+	if (image_capacity < 4)
+		return -1;
+	image_out[0] = 1;
+	image_out[1] = 2;
+	image_out[2] = 3;
+	image_out[3] = 4;
+	return 4;
+}
+
+static int stub_adapter_restore(
+	const uint8_t *image_in,
+	int32_t image_len)
+{
+	(void)image_in;
+	(void)image_len;
+	return stub_adapter_restore_fail ? 1 : 0;
 }
 
 /* ---------- controls ---------- */
@@ -286,6 +350,146 @@ int main(
 		CHECK(campaign_mission_save("hazard_e1", 0) == false);
 		CHECK(campaign_mission_load(0, &reloaded) == false);
 		CHECK(campaign_mission_load("hazard_e1", 0) == false);
+	}
+
+	/* ADAPTER controls (cooperative guest slice): serialized bind,
+	 * fenced dispatch, capture, and generation-advancing restore with
+	 * no post-restore __init. Schema-owned values (kind, ABI, blob)
+	 * arrive as bind parameters; the stubs above stand in for the
+	 * runtime wrapper's guest slots. */
+	{
+		struct campaign_coop_adapter adapter;
+		struct campaign_coop_adapter adapter2;
+		struct campaign_coop_adapter_slots slots;
+		uint8_t event_in[8] = { 9, 8, 7, 6, 5, 4, 3, 2 };
+		uint8_t action_out[16];
+		uint8_t image[32];
+		int32_t produced = -1;
+
+		slots.guest_abi_version = stub_adapter_abi_version;
+		slots.guest_init = stub_adapter_init;
+		slots.guest_handle_event = stub_adapter_handle;
+		slots.guest_capture_image = stub_adapter_capture;
+		slots.guest_restore_image = stub_adapter_restore;
+
+		/* Unbound adapters refuse every guest-touching call. */
+		adapter.bound_generation = CAMPAIGN_COOP_ADAPTER_NO_GENERATION;
+		CHECK(campaign_coop_adapter_bound(&adapter) == false);
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 0, 100,
+			event_in, 8, action_out, 16, &produced) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+		CHECK(campaign_coop_adapter_capture(&adapter, image, 32,
+			&produced) == CAMPAIGN_COOP_ADAPTER_REFUSED);
+		CHECK(campaign_coop_adapter_restore(&adapter, 1, 200, 11,
+			image, 4) == CAMPAIGN_COOP_ADAPTER_REFUSED);
+
+		/* Incomplete slots bind nothing. */
+		slots.guest_handle_event = 0;
+		CHECK(campaign_coop_adapter_bind(&adapter, 0, 3, 3, 7, 11,
+			&slots, event_in, 8, 100) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+		slots.guest_handle_event = stub_adapter_handle;
+		CHECK(campaign_coop_adapter_bound(&adapter) == false);
+
+		/* NULL adapter, bad generation, and kind mismatch refuse. */
+		CHECK(campaign_coop_adapter_bind(0, 0, 3, 3, 7, 11,
+			&slots, event_in, 8, 100) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+		CHECK(campaign_coop_adapter_bind(&adapter, -1, 3, 3, 7, 11,
+			&slots, event_in, 8, 100) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+		CHECK(campaign_coop_adapter_bind(&adapter, 0, 4, 3, 7, 11,
+			&slots, event_in, 8, 100) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+
+		/* ABI mismatch refuses before __init runs. */
+		stub_adapter_abi = 8;
+		CHECK(campaign_coop_adapter_bind(&adapter, 0, 3, 3, 7, 11,
+			&slots, event_in, 8, 100) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+		CHECK(stub_adapter_init_calls == 0);
+		stub_adapter_abi = 7;
+
+		/* A failing __init refuses and binds nothing. */
+		stub_adapter_init_fail = 1;
+		CHECK(campaign_coop_adapter_bind(&adapter, 0, 3, 3, 7, 11,
+			&slots, event_in, 8, 100) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+		CHECK(stub_adapter_init_calls == 1);
+		CHECK(campaign_coop_adapter_bound(&adapter) == false);
+		stub_adapter_init_fail = 0;
+
+		/* Good bind: kind gate, handshake, exactly one __init. */
+		CHECK(campaign_coop_adapter_bind(&adapter, 0, 3, 3, 7, 11,
+			&slots, event_in, 8, 100) ==
+			CAMPAIGN_COOP_ADAPTER_OK);
+		CHECK(stub_adapter_init_calls == 2);
+		CHECK(campaign_coop_adapter_bound(&adapter) == true);
+
+		/* Empty init params bind a second adapter cleanly. */
+		CHECK(campaign_coop_adapter_bind(&adapter2, 0, 3, 3, 7, 11,
+			&slots, 0, 0, 1000) == CAMPAIGN_COOP_ADAPTER_OK);
+		CHECK(stub_adapter_init_calls == 3);
+
+		/* Dispatch fence: wrong generation or serial refuses
+		 * untouched; the fenced serial dispatches exactly once. */
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 1, 100,
+			event_in, 8, action_out, 16, &produced) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 0, 101,
+			event_in, 8, action_out, 16, &produced) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 0, 100,
+			event_in, 8, action_out, 16, &produced) ==
+			CAMPAIGN_COOP_ADAPTER_OK);
+		CHECK(produced == 8);
+		CHECK(action_out[0] == 9 && action_out[7] == 2);
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 0, 100,
+			event_in, 8, action_out, 16, &produced) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+
+		/* A guest refusal preserves the fence for retry. */
+		stub_adapter_event_fail = 1;
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 0, 101,
+			event_in, 8, action_out, 16, &produced) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+		stub_adapter_event_fail = 0;
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 0, 101,
+			event_in, 8, action_out, 16, &produced) ==
+			CAMPAIGN_COOP_ADAPTER_OK);
+		CHECK(produced == 8);
+
+		/* Capture carries the guest image. */
+		CHECK(campaign_coop_adapter_capture(&adapter, image, 32,
+			&produced) == CAMPAIGN_COOP_ADAPTER_OK);
+		CHECK(produced == 4);
+		CHECK(image[0] == 1 && image[3] == 4);
+
+		/* Restore refusals keep the prior binding intact. */
+		CHECK(campaign_coop_adapter_restore(&adapter, 0, 200, 11,
+			image, 4) == CAMPAIGN_COOP_ADAPTER_REFUSED);
+		CHECK(campaign_coop_adapter_restore(&adapter, 1, 200, 12,
+			image, 4) == CAMPAIGN_COOP_ADAPTER_REFUSED);
+		stub_adapter_restore_fail = 1;
+		CHECK(campaign_coop_adapter_restore(&adapter, 1, 200, 11,
+			image, 4) == CAMPAIGN_COOP_ADAPTER_REFUSED);
+		stub_adapter_restore_fail = 0;
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 0, 102,
+			event_in, 8, action_out, 16, &produced) ==
+			CAMPAIGN_COOP_ADAPTER_OK);
+
+		/* Good restore advances the generation, resets the fence,
+		 * and never re-runs __init; the old generation is dead. */
+		CHECK(campaign_coop_adapter_restore(&adapter, 1, 200, 11,
+			image, 4) == CAMPAIGN_COOP_ADAPTER_OK);
+		CHECK(stub_adapter_init_calls == 3);
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 0, 102,
+			event_in, 8, action_out, 16, &produced) ==
+			CAMPAIGN_COOP_ADAPTER_REFUSED);
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 1, 200,
+			event_in, 8, action_out, 16, &produced) ==
+			CAMPAIGN_COOP_ADAPTER_OK);
+		CHECK(produced == 8);
 	}
 
 	printf("PASS campaign_coop_native_controls: %d checks\n", checks_run);
