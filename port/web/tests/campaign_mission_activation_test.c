@@ -19,7 +19,11 @@
  * scenario, out-of-range volume, bad episode) and PENDING_ANCHOR leave
  * any prior activation untouched, so an explicit anchor never silently
  * becomes the volume default; per-episode loads read the field the
- * author commit wrote.
+ * author commit wrote. The bound path (activate_bound over canned
+ * encounter rows) commits record plus binding table only on the fully
+ * bound outcome: pending becomes OK with bindings, unbindable refuses
+ * with the prior bound commit untouched; no table before the first
+ * bound activation.
  *
  * Native DAG shape (tooling owner wires this): one TU .o per test .c;
  * link the real scenario/files providers plus exactly this control
@@ -44,7 +48,9 @@
 #define datastore_read activation_datastore_read
 
 #include "game/campaign_mission.c"
+#include "game/campaign_mission_associate.h"
 #include "scenario/scenario_definitions.h"
+#include "ai/ai_scenario_definitions.h"
 
 #define ACTIVATION_STUB_MAX_FIELDS 8
 #define ACTIVATION_STUB_FIELD_NAME_LIMIT 64
@@ -173,11 +179,24 @@ int main(void)
 	struct campaign_mission loaded;
 	struct campaign_mission_apply_report report;
 	static struct scenario canned_scenario;
+	static struct encounter_definition canned_rows[2];
+	static struct firing_position_definition canned_feeds[3];
 	const struct campaign_mission *activated;
+	const struct campaign_mission_binding *table;
+	int16_t table_count = -1;
+	int16_t bound = -1;
 	int writes_before;
 
 	memset(&canned_scenario, 0, sizeof(canned_scenario));
+	memset(canned_rows, 0, sizeof(canned_rows));
+	memset(canned_feeds, 0, sizeof(canned_feeds));
 	canned_scenario.trigger_volumes.count = 4;
+	canned_rows[0].firing_positions.count = 3;
+	canned_rows[0].firing_positions.address = canned_feeds;
+	canned_rows[1].firing_positions.count = 1;
+	canned_rows[1].firing_positions.address = canned_feeds;
+	canned_scenario.ai_encounters.count = 2;
+	canned_scenario.ai_encounters.address = canned_rows;
 
 	/* Episode 0: two anchor-free encounters, both volumes in range. */
 	CHECK(activation_commit_episode(0, "E1 Beachhead", 0, _actor_grunt, 4,
@@ -242,6 +261,64 @@ int main(void)
 	memset(&loaded, 0xA5, sizeof(loaded));
 	CHECK(campaign_mission_load_episode(5, &loaded) == false);
 	CHECK(loaded.name[0] == (char)0xA5);
+
+	/* No bound activation yet: no table. */
+	CHECK(campaign_mission_bound_table(&table_count) == NULL);
+
+	/* Bound activation of the anchor-free record: OK with an empty
+	 * table, and the record commits for the encounter layer. */
+	CHECK(activation_commit_episode(3, "E4 Bound Free", 0, _actor_grunt, 4,
+		CAMPAIGN_MISSION_NO_ANCHOR) == CAMPAIGN_MISSION_AUTHOR_SAVED);
+	memset(&report, 0, sizeof(report));
+	bound = -1;
+	CHECK(campaign_mission_activate_bound(3, &report) == CAMPAIGN_MISSION_APPLY_OK);
+	CHECK(bound == 0);
+	activated = campaign_mission_activated();
+	CHECK(activated != NULL);
+	CHECK(activated->episode_index == 3);
+	table = campaign_mission_bound_table(&table_count);
+	CHECK(table != NULL);
+	CHECK(table_count == 0);
+
+	/* Bound activation of the anchored record: the resolver's pending
+	 * becomes OK with one binding, never pending. */
+	CHECK(activation_commit_episode(4, "E5 Bound Anchor", 1, _actor_jackal, 3,
+		2) == CAMPAIGN_MISSION_AUTHOR_SAVED);
+	memset(&report, 0, sizeof(report));
+	bound = -1;
+	CHECK(campaign_mission_activate_bound(4, &report) == CAMPAIGN_MISSION_APPLY_OK);
+	CHECK(report.pending_count == 1);
+	CHECK(bound == 1);
+	activated = campaign_mission_activated();
+	CHECK(activated != NULL);
+	CHECK(activated->episode_index == 4);
+	table = campaign_mission_bound_table(&table_count);
+	CHECK(table != NULL);
+	CHECK(table_count == 1);
+	CHECK(table[0].encounter == 0);
+	CHECK(table[0].firing_position == 2);
+
+	/* Unbindable anchor: refusal, prior bound commit untouched. */
+	CHECK(activation_commit_episode(5, "E6 Bound Refused", 0, _actor_grunt, 4,
+		7) == CAMPAIGN_MISSION_AUTHOR_SAVED);
+	memset(&report, 0, sizeof(report));
+	bound = -1;
+	CHECK(campaign_mission_activate_bound(5, &report) ==
+		CAMPAIGN_MISSION_APPLY_REFUSED);
+	CHECK(bound == 0);
+	activated = campaign_mission_activated();
+	CHECK(activated != NULL);
+	CHECK(activated->episode_index == 4);
+	table = campaign_mission_bound_table(&table_count);
+	CHECK(table != NULL);
+	CHECK(table_count == 1);
+	CHECK(table[0].firing_position == 2);
+
+	/* NULL report and NULL bound_out are tolerated. */
+	CHECK(campaign_mission_activate_bound(3, NULL, NULL) ==
+		CAMPAIGN_MISSION_APPLY_OK);
+	CHECK(campaign_mission_activate_bound(-1, &report, &bound) ==
+		CAMPAIGN_MISSION_APPLY_REFUSED);
 
 	global_scenario = NULL;
 

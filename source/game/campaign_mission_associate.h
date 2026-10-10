@@ -43,6 +43,10 @@ struct campaign_mission_binding
  * includable without tag types. */
 struct scenario;
 
+/* Scenario resolver report (defined in game/campaign_mission_apply.h);
+ * forward-declared so this header stays includable without tag types. */
+struct campaign_mission_apply_report;
+
 /* Binds every anchored encounter of mission against scenario. Every
  * authored position must exist in the table (authored N drives row N
  * whether anchored or not). Unanchored
@@ -62,5 +66,28 @@ int campaign_mission_associate(
 	struct campaign_mission_binding *bindings,
 	int16_t binding_capacity,
 	int16_t *bound_out);
+
+/* Encounter-layer bind point. Loads the episode record, resolves it
+ * against the loaded scenario's trigger_volumes, associates every
+ * anchored encounter, and commits the record with its binding table
+ * only on the fully bound outcome. Returns CAMPAIGN_MISSION_APPLY_OK
+ * (bound_out holds the table length, possibly zero for anchor-free
+ * records) or CAMPAIGN_MISSION_APPLY_REFUSED; the resolver's
+ * PENDING_ANCHOR never escapes: it becomes OK when every anchor binds
+ * and REFUSED otherwise, with any prior activation untouched either
+ * way. campaign_mission_activate keeps its own contract untouched.
+ * Implemented in game/campaign_mission.c beside the commit it shares;
+ * the pure bind stays above. The future JS readback names
+ * platform_web_campaign_mission_activated_episode (not yet exported). */
+int campaign_mission_activate_bound(
+	int16_t episode_index,
+	struct campaign_mission_apply_report *report,
+	int16_t *bound_out);
+
+/* Last bound table, or NULL before the first bound activation. Read by
+ * the encounter layer; never mutated in place. The table holds
+ * *count_out rows when count_out is not NULL. */
+const struct campaign_mission_binding *campaign_mission_bound_table(
+	int16_t *count_out);
 
 #endif /* CAMPAIGN_MISSION_ASSOCIATE_H */
