@@ -17,9 +17,10 @@
  * in the game.
  *
  * Native DAG shape (tooling owner wires this; shown for reference):
- * compile source/game/campaign_coop.c + this file with the game-lib
- * cflags, link with the stub definitions below satisfying the engine
- * externals, run, expect exit 0 and the PASS line.
+ * compile source/game/campaign_coop.c + source/game/campaign_mission.c
+ * + this file with the game-lib cflags, link with the stub definitions
+ * below satisfying the engine externals, run, expect exit 0 and the
+ * PASS line.
  */
 
 #include <stdio.h>
@@ -34,6 +35,7 @@
 #include "memory/data.h"
 #include "game/players.h"
 #include "game/campaign_coop.h"
+#include "game/campaign_mission.h"
 
 /* ---------- link-level stubs: backing store only ---------- */
 
@@ -72,6 +74,48 @@ void *data_iterator_next(
 	iterator->datum_index = fake_roster[fake_roster_pos].player_index;
 	fake_roster_pos++;
 	return &backing[fake_roster_pos - 1];
+}
+
+/* Datastore stub: one flat field store, so save/load runs its real
+ * round-trip bytes with no filesystem. */
+static unsigned char stub_datastore[sizeof(struct campaign_mission)];
+static long stub_datastore_length = -1;
+
+boolean datastore_write(
+	const char *file_name,
+	const char *field_name,
+	long length,
+	const void *data)
+{
+	const unsigned char *bytes = (const unsigned char *)data;
+	long i;
+
+	(void)file_name;
+	(void)field_name;
+	if (!data || length != (long)sizeof(stub_datastore))
+		return FALSE;
+	for (i = 0; i < length; i++)
+		stub_datastore[i] = bytes[i];
+	stub_datastore_length = length;
+	return TRUE;
+}
+
+boolean datastore_read(
+	const char *file_name,
+	const char *field_name,
+	long length,
+	void *data)
+{
+	unsigned char *bytes = (unsigned char *)data;
+	long i;
+
+	(void)file_name;
+	(void)field_name;
+	if (!data || stub_datastore_length != length)
+		return FALSE;
+	for (i = 0; i < length; i++)
+		bytes[i] = stub_datastore[i];
+	return TRUE;
 }
 
 /* ---------- controls ---------- */
@@ -184,6 +228,65 @@ int main(
 	CHECK(campaign_coop_host_episode() == 0);
 	CHECK(campaign_coop_host_cap() == 1);
 	CHECK(campaign_coop_session_full() == FALSE);
+
+	/* MISSION controls (authoring slice 1): save validates first, load
+	 * validates what the store returns, and the round trip is exact. */
+	{
+		struct campaign_mission mission;
+		struct campaign_mission reloaded;
+		unsigned int i;
+
+		for (i = 0; i < sizeof(mission.name); i++)
+			mission.name[i] = '\0';
+		mission.version = CAMPAIGN_MISSION_VERSION;
+		mission.episode_index = 0;
+		mission.name[0] = 'E';
+		mission.name[1] = '1';
+		mission.encounter_count = 1;
+		mission.encounters[0].trigger_volume_index = 0;
+		mission.encounters[0].actor_type = _actor_grunt;
+		mission.encounters[0].actor_count = 4;
+		mission.encounters[0].anchor_index = CAMPAIGN_MISSION_NO_ANCHOR;
+
+		CHECK(campaign_mission_save("hazard_e1", &mission) == true);
+		for (i = 0; i < sizeof(reloaded.name); i++)
+			reloaded.name[i] = (char)0xA5;
+		reloaded.version = 0;
+		reloaded.episode_index = -1;
+		reloaded.encounter_count = 0;
+		CHECK(campaign_mission_load("hazard_e1", &reloaded) == true);
+		CHECK(reloaded.version == CAMPAIGN_MISSION_VERSION);
+		CHECK(reloaded.episode_index == 0);
+		CHECK(reloaded.name[0] == 'E' && reloaded.name[1] == '1');
+		CHECK(reloaded.encounter_count == 1);
+		CHECK(reloaded.encounters[0].trigger_volume_index == 0);
+		CHECK(reloaded.encounters[0].actor_type == _actor_grunt);
+		CHECK(reloaded.encounters[0].actor_count == 4);
+		CHECK(reloaded.encounters[0].anchor_index == CAMPAIGN_MISSION_NO_ANCHOR);
+
+		/* Invalid records never reach the store; the prior bytes stand. */
+		mission.encounter_count = 0;
+		CHECK(campaign_mission_save("hazard_e1", &mission) == false);
+		mission.encounter_count = 1;
+		CHECK(campaign_mission_load("hazard_e1", &reloaded) == true);
+		CHECK(reloaded.encounter_count == 1);
+
+		/* Corrupt stores fail closed and leave the out-param alone. */
+		stub_datastore[0] = 0;
+		stub_datastore[1] = 0;
+		reloaded.version = CAMPAIGN_MISSION_VERSION;
+		reloaded.episode_index = 3;
+		CHECK(campaign_mission_load("hazard_e1", &reloaded) == false);
+		CHECK(reloaded.episode_index == 3);
+
+		/* Empty store and NULLs fail without touching the out-param. */
+		stub_datastore_length = -1;
+		CHECK(campaign_mission_load("hazard_e1", &reloaded) == false);
+		CHECK(campaign_mission_save(0, &mission) == false);
+		CHECK(campaign_mission_save("hazard_e1", 0) == false);
+		CHECK(campaign_mission_load(0, &reloaded) == false);
+		CHECK(campaign_mission_load("hazard_e1", 0) == false);
+	}
 
 	printf("PASS campaign_coop_native_controls: %d checks\n", checks_run);
 	return 0;

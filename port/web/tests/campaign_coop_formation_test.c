@@ -19,6 +19,16 @@
 
 #include "game/campaign_coop.h"
 
+/* Engine scalar contract for the mission header's actor enum: ai/actor_types.h
+ * spells later fields with these Xbox ABI types (byte/boolean), which the
+ * engine build takes from cseries/cseries.h. The standalone test has no
+ * engine link and must not pull the port stdio redirect, so it states the
+ * stable ABI spellings directly; the enum VALUES and validator logic under
+ * test stay the exact header bytes. */
+typedef unsigned char byte;
+typedef unsigned char boolean;
+#include "game/campaign_mission.h"
+
 static int checks_run;
 
 #define CHECK(condition) \
@@ -89,6 +99,75 @@ int main(
 	CHECK(campaign_coop_host_config_valid(0, 0) == false);
 	CHECK(campaign_coop_host_config_valid(0, 5) == false);
 	CHECK(campaign_coop_host_config_valid(-2, 9) == false);
+
+	/* Mission record validation (authoring slice 1): E1 shipboard shape —
+	 * versioned, episode-bound, named, encounters over scenario trigger
+	 * volumes with hostile actors only. */
+	{
+		struct campaign_mission mission;
+		unsigned int i;
+
+		for (i = 0; i < sizeof(mission.name); i++)
+			mission.name[i] = '\0';
+		mission.version = CAMPAIGN_MISSION_VERSION;
+		mission.episode_index = 0;
+		mission.name[0] = 'E';
+		mission.name[1] = '1';
+		mission.encounter_count = 2;
+		mission.encounters[0].trigger_volume_index = 0;
+		mission.encounters[0].actor_type = _actor_grunt;
+		mission.encounters[0].actor_count = 4;
+		mission.encounters[0].anchor_index = CAMPAIGN_MISSION_NO_ANCHOR;
+		mission.encounters[1].trigger_volume_index = 3;
+		mission.encounters[1].actor_type = _actor_infection_form;
+		mission.encounters[1].actor_count = 6;
+		mission.encounters[1].anchor_index = 1;
+		CHECK(campaign_mission_valid(&mission) == true);
+
+		CHECK(campaign_mission_actor_hostile(_actor_grunt) == true);
+		CHECK(campaign_mission_actor_hostile(_actor_hunter) == true);
+		CHECK(campaign_mission_actor_hostile(_actor_marine) == false);
+		CHECK(campaign_mission_actor_hostile(_actor_sentinel) == false);
+
+		mission.version = 0;
+		CHECK(campaign_mission_valid(&mission) == false);
+		mission.version = CAMPAIGN_MISSION_VERSION;
+
+		mission.episode_index = CAMPAIGN_COOP_EPISODE_COUNT;
+		CHECK(campaign_mission_valid(&mission) == false);
+		mission.episode_index = 0;
+
+		mission.name[0] = '\0';
+		CHECK(campaign_mission_valid(&mission) == false);
+		mission.name[0] = 'E';
+
+		mission.encounter_count = 0;
+		CHECK(campaign_mission_valid(&mission) == false);
+		mission.encounter_count = CAMPAIGN_MISSION_MAX_ENCOUNTERS + 1;
+		CHECK(campaign_mission_valid(&mission) == false);
+		mission.encounter_count = 2;
+
+		mission.encounters[0].trigger_volume_index = -1;
+		CHECK(campaign_mission_valid(&mission) == false);
+		mission.encounters[0].trigger_volume_index = 0;
+
+		mission.encounters[0].actor_type = _actor_marine;
+		CHECK(campaign_mission_valid(&mission) == false);
+		mission.encounters[0].actor_type = _actor_grunt;
+
+		mission.encounters[1].actor_count = 0;
+		CHECK(campaign_mission_valid(&mission) == false);
+		mission.encounters[1].actor_count = CAMPAIGN_MISSION_MAX_ACTORS_PER_ENCOUNTER + 1;
+		CHECK(campaign_mission_valid(&mission) == false);
+		mission.encounters[1].actor_count = 6;
+
+		mission.encounters[1].anchor_index = CAMPAIGN_MISSION_NO_ANCHOR - 1;
+		CHECK(campaign_mission_valid(&mission) == false);
+		mission.encounters[1].anchor_index = 1;
+
+		CHECK(campaign_mission_valid(&mission) == true);
+		CHECK(campaign_mission_valid(0) == false);
+	}
 
 	/* NULL session is refused, never dereferenced. */
 	CHECK(campaign_coop_session_form_from_roster(0, 0, machines, locals, indices, 2) == false);
