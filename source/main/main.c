@@ -339,6 +339,7 @@ symbols in this file:
 #include "real_math.h"
 #include "game.h"
 #include "game_engine.h"
+#include "game/campaign_coop.h"
 #include "game/cheats.h"
 #include "game/player_control.h"
 #include "game/player_control_runtime.h"
@@ -844,6 +845,19 @@ static void create_local_players(
 				gamepad_index,
 				player);
 		}
+	}
+
+	/* Hazard Run (Vehicle A, slice 2): form the campaign session from the
+	 * roster now that the local seats exist. Campaign maps only: the solo
+	 * level index is NONE on the main menu and multiplayer maps, where the
+	 * committed totals stay unformed and every reader keeps its old value.
+	 * The episode is unbound until the content layer assigns it. */
+	if (main_get_current_solo_level() != NONE)
+	{
+		struct campaign_coop_session formed_session;
+
+		if (campaign_coop_session_form(&formed_session, CAMPAIGN_COOP_NO_SEAT))
+			campaign_coop_session_commit(&formed_session);
 	}
 
 	return;
