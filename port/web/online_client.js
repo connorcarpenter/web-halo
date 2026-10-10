@@ -223,6 +223,11 @@
     elements.livePlayerOnline = byId("live-player-online");
     elements.livePlayerCampaign = byId("live-player-campaign");
     elements.livePlayerToday = byId("live-player-today");
+    elements.missionName = byId("online-mission-name");
+    elements.missionEpisode = byId("online-mission-episode");
+    elements.missionEncounters = byId("online-mission-encounters");
+    elements.missionAddEncounter = byId("online-mission-add-encounter");
+    elements.missionSave = byId("online-mission-save");
   }
 
   function playerCountLabel(count, suffix) {
@@ -1198,6 +1203,149 @@
   function missionSaveStatus() {
     if (!session.runtimeReady) throw new Error("Halo is still starting.");
     return pollMissionAuthor();
+  }
+
+  /* Hazard Run mission row editor (Usher 61495; bridge contract Finn
+     61479): a visual encounter-row editor inside the online dialog. Rows
+     are the single source of truth — the save button reads them through
+     the same normalize/stage path as the data API, and a refusal only
+     reports through the status line: inputs are never cleared except by
+     the author. The editor stays available outside room operations; the
+     staged bridge is independent mission state. */
+  var CAMPAIGN_MISSION_HOSTILE_ACTOR_LABELS = [
+    [0, "Elite"],
+    [1, "Jackal"],
+    [2, "Grunt"],
+    [3, "Hunter"],
+    [9, "Combat form"],
+    [10, "Infection form"],
+    [11, "Carrier form"],
+  ];
+
+  function missionEncounterRows() {
+    if (!elements.missionEncounters ||
+        typeof elements.missionEncounters.querySelectorAll !== "function") return [];
+    return Array.prototype.slice.call(
+      elements.missionEncounters.querySelectorAll(".mission-encounter"));
+  }
+
+  function missionLabeledNumber(labelText, name, value, minimum, maximum) {
+    var label = document.createElement("label");
+    label.className = "advanced-number";
+    label.textContent = labelText;
+    var input = document.createElement("input");
+    input.type = "number";
+    input.name = name;
+    input.min = String(minimum);
+    if (maximum !== null && maximum !== undefined) input.max = String(maximum);
+    input.step = "1";
+    input.value = String(value);
+    label.appendChild(input);
+    return label;
+  }
+
+  function missionActorSelect() {
+    var label = document.createElement("label");
+    label.className = "advanced-number";
+    label.textContent = "Actor";
+    var select = document.createElement("select");
+    select.name = "mission-actor";
+    CAMPAIGN_MISSION_HOSTILE_ACTOR_LABELS.forEach(function(entry) {
+      var option = document.createElement("option");
+      option.value = String(entry[0]);
+      option.textContent = entry[1];
+      select.appendChild(option);
+    });
+    select.value = "0";
+    label.appendChild(select);
+    return label;
+  }
+
+  function syncMissionEditor() {
+    var rows = missionEncounterRows();
+    rows.forEach(function(row, index) {
+      var legend = row.querySelector("legend");
+      if (legend) legend.textContent = "Encounter " + (index + 1);
+    });
+    if (elements.missionAddEncounter) {
+      elements.missionAddEncounter.disabled =
+        rows.length >= CAMPAIGN_MISSION_MAX_ENCOUNTERS;
+    }
+  }
+
+  function addMissionEncounterRow() {
+    if (!elements.missionEncounters || typeof document.createElement !== "function") return false;
+    if (missionEncounterRows().length >= CAMPAIGN_MISSION_MAX_ENCOUNTERS) {
+      syncMissionEditor();
+      return false;
+    }
+    var row = document.createElement("fieldset");
+    row.className = "advanced-fields mission-encounter";
+    var legend = document.createElement("legend");
+    legend.textContent = "Encounter";
+    row.appendChild(legend);
+    row.appendChild(missionLabeledNumber("Trigger volume", "mission-volume", 0, 0, null));
+    row.appendChild(missionActorSelect());
+    row.appendChild(missionLabeledNumber("Count", "mission-count", 1, 1,
+      CAMPAIGN_MISSION_MAX_ACTORS_PER_ENCOUNTER));
+    row.appendChild(missionLabeledNumber("Anchor (−1 = none)", "mission-anchor",
+      CAMPAIGN_MISSION_NO_ANCHOR, CAMPAIGN_MISSION_NO_ANCHOR, null));
+    var remove = document.createElement("button");
+    remove.className = "mission-encounter-remove";
+    remove.type = "button";
+    remove.textContent = "Remove";
+    row.appendChild(remove);
+    elements.missionEncounters.appendChild(row);
+    syncMissionEditor();
+    return true;
+  }
+
+  function readMissionEditor() {
+    return {
+      name: elements.missionName ? elements.missionName.value : "",
+      episodeIndex: elements.missionEpisode ? elements.missionEpisode.value : "",
+      encounters: missionEncounterRows().map(function(row) {
+        function field(name) {
+          var input = row.querySelector('[name="' + name + '"]');
+          return input ? input.value : "";
+        }
+        return {
+          triggerVolumeIndex: field("mission-volume"),
+          actorType: field("mission-actor"),
+          actorCount: field("mission-count"),
+          anchorIndex: field("mission-anchor"),
+        };
+      }),
+    };
+  }
+
+  function saveMissionEditor() {
+    try {
+      missionSave(readMissionEditor());
+      missionSaveStatus();
+    } catch (error) {
+      setStatus(error.message, "error");
+    }
+  }
+
+  function initializeMissionEditor() {
+    if (!elements.missionEncounters || !elements.missionAddEncounter ||
+        !elements.missionSave || typeof document.createElement !== "function") return;
+    if (missionEncounterRows().length === 0) addMissionEncounterRow();
+    elements.missionAddEncounter.addEventListener("click", function() {
+      addMissionEncounterRow();
+    });
+    elements.missionEncounters.addEventListener("click", function(event) {
+      var target = event && event.target;
+      if (!target || target.className !== "mission-encounter-remove") return;
+      var row = target.parentNode;
+      if (row && typeof row.remove === "function") row.remove();
+      else if (row && row.parentNode) row.parentNode.removeChild(row);
+      syncMissionEditor();
+    });
+    elements.missionSave.addEventListener("click", function() {
+      saveMissionEditor();
+    });
   }
 
   function connectedFriendsLabel(count) {
@@ -2452,6 +2600,7 @@
     restoreHostSettings();
     restorePlayerProfile();
     attachEvents();
+    initializeMissionEditor();
     renderRoster();
     setBusy(false);
     startPresencePolling();

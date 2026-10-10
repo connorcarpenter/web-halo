@@ -12,9 +12,34 @@ const vm = require('node:vm');
 
 const webDirectory = path.join(__dirname, '..');
 
+function matchesSelector(node, selector) {
+  const attribute = selector.match(/^([a-z]*)?\[name="([^"]+)"\]$/);
+  if (attribute) {
+    if (attribute[1] && node.tagName !== attribute[1].toUpperCase()) return false;
+    return node.name === attribute[2];
+  }
+  if (selector[0] === '.') {
+    return (node.className || '').split(' ').includes(selector.slice(1));
+  }
+  return node.tagName === selector.toUpperCase();
+}
+
+function selectAll(root, selector) {
+  const found = [];
+  (function walk(node) {
+    for (const child of node.children) {
+      if (matchesSelector(child, selector)) found.push(child);
+      walk(child);
+    }
+  })(root);
+  return found;
+}
+
 function element(overrides) {
   const listeners = {};
-  return Object.assign({
+  const node = Object.assign({
+    tagName: 'DIV',
+    className: '',
     dataset: {},
     disabled: false,
     hidden: false,
@@ -22,7 +47,24 @@ function element(overrides) {
     options: [],
     value: '',
     textContent: '',
+    children: [],
+    parentNode: null,
     addEventListener(type, listener) { listeners[type] = listener; },
+    appendChild(child) {
+      child.parentNode = node;
+      node.children.push(child);
+      return child;
+    },
+    removeChild(child) {
+      node.children = node.children.filter(candidate => candidate !== child);
+      child.parentNode = null;
+      return child;
+    },
+    remove() {
+      if (node.parentNode) node.parentNode.removeChild(node);
+    },
+    querySelector(selector) { return selectAll(node, selector)[0] || null; },
+    querySelectorAll(selector) { return selectAll(node, selector); },
     close() { this.open = false; },
     focus() { this.focused = true; },
     removeAttribute(name) { delete this[name]; },
@@ -31,6 +73,15 @@ function element(overrides) {
     showModal() { this.open = true; },
     listeners,
   }, overrides || {});
+  Object.defineProperty(node, 'firstChild', {
+    get() { return node.children[0] || null; },
+    configurable: true,
+  });
+  return node;
+}
+
+function createElement(tag) {
+  return element({ tagName: String(tag).toUpperCase() });
 }
 
 const elements = {};
@@ -45,7 +96,9 @@ const elements = {};
   'online-join-confirm', 'online-join-form', 'online-join-profile',
   'online-join-summary', 'online-leave-host',
   'online-lives', 'online-map', 'online-map-next', 'online-map-options',
-  'online-mode', 'online-mode-back', 'online-mode-options',
+  'online-mission-add-encounter', 'online-mission-editor',
+  'online-mission-encounters', 'online-mission-episode', 'online-mission-name',
+  'online-mission-save', 'online-mode', 'online-mode-back', 'online-mode-options',
   'online-other-players-on-radar', 'online-player-name', 'online-profile',
   'online-profile-preview', 'online-profile-preview-name',
   'online-progress', 'online-respawn-seconds', 'online-score-to-win',
@@ -70,6 +123,7 @@ const context = {
   console,
   document: {
     readyState: 'complete',
+    createElement,
     getElementById: id => elements[id],
     querySelector: () => null,
     execCommand: () => true,
@@ -280,4 +334,65 @@ function expectedCalls(mission) {
   assert.match(elements['online-status'].textContent, /hasn.t confirmed/i);
 
   console.log('online_client mission editor tests passed');
+})();
+
+(function () {
+  const encounters = () => elements['online-mission-encounters']
+    .querySelectorAll('.mission-encounter');
+  const field = (row, name) => row.querySelector('[name="' + name + '"]');
+  const click = id => elements[id].listeners.click({ target: elements[id] });
+  function fillRow(row, volume, actor, count, anchor) {
+    field(row, 'mission-volume').value = String(volume);
+    field(row, 'mission-actor').value = String(actor);
+    field(row, 'mission-count').value = String(count);
+    field(row, 'mission-anchor').value = String(anchor);
+  }
+
+  /* The editor opens with one default encounter row at canonical defaults. */
+  assert.equal(encounters().length, 1);
+  assert.equal(field(encounters()[0], 'mission-volume').value, '0');
+  assert.equal(field(encounters()[0], 'mission-actor').value, '0');
+  assert.equal(field(encounters()[0], 'mission-count').value, '1');
+  assert.equal(field(encounters()[0], 'mission-anchor').value, '-1');
+
+  /* Rows add up to the eight-encounter cap, then the add stops. */
+  for (let added = 0; added < 7; added++) click('online-mission-add-encounter');
+  assert.equal(encounters().length, 8);
+  click('online-mission-add-encounter');
+  assert.equal(encounters().length, 8);
+  assert.equal(elements['online-mission-add-encounter'].disabled, true);
+
+  /* Removing a row drops it and re-enables adding. */
+  const removeButtons = encounters()[7].querySelectorAll('.mission-encounter-remove');
+  assert.equal(removeButtons.length, 1);
+  elements['online-mission-encounters'].listeners.click({ target: removeButtons[0] });
+  assert.equal(encounters().length, 7);
+  assert.equal(elements['online-mission-add-encounter'].disabled, false);
+
+  /* A filled editor saves exactly through the staged bridge. */
+  missionCalls.length = 0;
+  elements['online-mission-name'].value = 'Deck Breach';
+  elements['online-mission-episode'].value = '1';
+  fillRow(encounters()[0], 4, 0, 3, -1);
+  fillRow(encounters()[1], 9, 10, 16, 2);
+  for (let extra = 2; extra < 7; extra++) fillRow(encounters()[extra], extra, 2, 1, -1);
+  click('online-mission-save');
+  const staged = missionCalls.filter(call => call[0] !== 'reset');
+  assert.equal(staged[0][0], 'begin');
+  assert.equal(staged[staged.length - 1][0], 'commit');
+  assert.equal(staged.filter(call => call[0] === 'encounter').length, 7);
+  assert.match(elements['online-status'].textContent, /Deck Breach/);
+
+  /* A refused field reports the refusal and preserves every staged edit. */
+  missionCalls.length = 0;
+  field(encounters()[0], 'mission-count').value = '99';
+  click('online-mission-save');
+  assert.deepEqual(missionCalls, [],
+    'an invalid editor field must not reach the bridge');
+  assert.match(elements['online-status'].textContent, /count/i);
+  assert.equal(elements['online-mission-name'].value, 'Deck Breach');
+  assert.equal(field(encounters()[0], 'mission-count').value, '99');
+  assert.equal(encounters().length, 7);
+
+  console.log('online_client mission editor DOM tests passed');
 })();

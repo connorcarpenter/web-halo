@@ -1772,6 +1772,25 @@
                 <button id="online-join" type="submit">Continue</button>
               </form>
             </details>
+            <details id="online-mission-editor" class="join-direct">
+              <summary>Author a Hazard Run mission</summary>
+              <label class="advanced-number">Mission name<input id="online-mission-name" type="text" autocomplete="off" spellcheck="false" maxlength="31" placeholder="Deck Breach"></label>
+              <label class="advanced-number">Episode<select id="online-mission-episode">
+                <option value="0">Episode 1</option>
+                <option value="1">Episode 2</option>
+                <option value="2">Episode 3</option>
+                <option value="3">Episode 4</option>
+                <option value="4">Episode 5</option>
+                <option value="5">Episode 6</option>
+                <option value="6">Episode 7</option>
+                <option value="7">Episode 8</option>
+              </select></label>
+              <div id="online-mission-encounters" class="mission-encounters" aria-label="Mission encounters"></div>
+              <div class="wizard-actions">
+                <button id="online-mission-add-encounter" type="button">Add encounter</button>
+                <button id="online-mission-save" class="primary" type="button">Save mission</button>
+              </div>
+            </details>
           </div>
           <div id="online-progress" class="online-actions" hidden>
             <button id="online-cancel" type="button">Cancel</button>
