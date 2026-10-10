@@ -3,6 +3,7 @@ import {
   activeTurnUsernames,
   actorIdFor,
   actorIdIsValid,
+  presenceIdFor,
   recordTurnEvent,
   rememberTurnUsernames,
   requestIsAuthorizedAdmin,
@@ -34,6 +35,7 @@ import { enforceTurnBandwidthCaps, turnIsDisabled, turnUsageSummary } from "./tu
 import { requireHumanVerification } from "./turnstile";
 
 export { SignalingRoom } from "./room";
+export { PlayerPresence } from "./presence";
 export type {
   ClientMessage,
   CreateRoomResponse,
@@ -54,6 +56,8 @@ const WEBSOCKET_ROUTE = /^\/v1\/rooms\/([^/]+)\/ws$/u;
 const ADMIN_BAN_ROUTE = /^\/v1\/admin\/bans\/([0-9a-f]{32})$/u;
 const MINIMUM_ROOM_CAPACITY = 2;
 const MAXIMUM_ROOM_CAPACITY = 128;
+const PRESENCE_SESSION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 class HttpError extends Error {
   constructor(
@@ -162,6 +166,26 @@ function parseBanInput(value: unknown): { actorId: string; reason: string; ttlSe
     reason: typeof record.reason === "string" ? record.reason : "Abusive TURN usage",
     ...(typeof record.ttlSeconds === "number" ? { ttlSeconds: record.ttlSeconds } : {}),
   };
+}
+
+function parsePresenceHeartbeat(value: unknown): {
+  campaign: boolean;
+  sessionId: string;
+} {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HttpError(400, "VALIDATION_FAILED", "Body must be a JSON object.");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.sessionId !== "string" ||
+    !PRESENCE_SESSION_ID_PATTERN.test(record.sessionId)
+  ) {
+    throw new HttpError(400, "VALIDATION_FAILED", "sessionId is malformed.");
+  }
+  if (typeof record.campaign !== "boolean") {
+    throw new HttpError(400, "VALIDATION_FAILED", "campaign must be a boolean.");
+  }
+  return { campaign: record.campaign, sessionId: record.sessionId };
 }
 
 async function handleAdminRequest(
@@ -648,11 +672,19 @@ async function route(request: Request, env: RuntimeEnv): Promise<Response> {
   }
 
   const origin = allowedOrigin(request, env);
+  if (request.method === "GET" && url.pathname === "/v1/presence") {
+    const summary = await env.PRESENCE.getByName("global").summary(Date.now());
+    return withCors(jsonResponse({
+      ...summary,
+      players: summary.online,
+      v: SIGNALING_PROTOCOL_VERSION,
+    }), origin);
+  }
   if (request.method === "OPTIONS") {
     const response = new Response(null, {
       headers: {
         "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "POST, DELETE, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
         "Access-Control-Max-Age": "86400",
       },
       status: 204,
@@ -663,6 +695,18 @@ async function route(request: Request, env: RuntimeEnv): Promise<Response> {
     await requireRateLimit(env.ROOM_CREATE_LIMITER, request, "room-create");
     await requireRateLimit(env.TURN_ISSUE_LIMITER, request, "turn-issue");
     return createRoom(request, env, origin);
+  }
+  if (request.method === "POST" && url.pathname === "/v1/presence") {
+    await requireRateLimit(env.SESSION_CREATE_LIMITER, request, "presence-heartbeat");
+    const input = parsePresenceHeartbeat(await readJsonBody(request));
+    const playerId = await presenceIdFor(request, env);
+    const summary = await env.PRESENCE.getByName("global").heartbeat(
+      input.sessionId,
+      playerId,
+      input.campaign,
+      Date.now(),
+    );
+    return withCors(jsonResponse({ ...summary, v: SIGNALING_PROTOCOL_VERSION }), origin);
   }
 
   const sessionMatch = SESSION_ROUTE.exec(url.pathname);

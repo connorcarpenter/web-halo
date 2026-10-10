@@ -7,6 +7,7 @@
   <meta name="halo-signaling-url" content="https://halo-web-signaling.otherness-bugs.workers.dev">
   <meta name="halo-build-id" content="web-multiplayer-v1">
   <meta name="halo-turnstile-sitekey" content="0x4AAAAAAFJKYJ-u47UliqDs">
+  <script src="coi-serviceworker.js"></script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
   <title>Halo: Combat Evolved</title>
   <style>
@@ -173,6 +174,25 @@
       font-size: .76rem;
     }
     .game-controls { display: flex; align-items: center; gap: .45rem; }
+    .game-settings-menu { position: relative; }
+    .game-settings-menu > summary { cursor: pointer; list-style: none; }
+    .game-settings-menu > summary::-webkit-details-marker { display: none; }
+    .game-settings-panel {
+      position: absolute;
+      left: 0;
+      bottom: calc(100% + .55rem);
+      z-index: 20;
+      width: min(19rem, calc(100vw - 1.5rem));
+      padding: .75rem;
+      border: 1px solid rgba(91, 184, 255, .38);
+      border-radius: .5rem;
+      background: rgba(2, 15, 30, .97);
+      box-shadow: 0 .8rem 2.4rem rgba(0, 0, 0, .55);
+      text-align: left;
+    }
+    .game-settings-option { display: flex; align-items: center; gap: .55rem; color: #d6eaf5; font-size: .76rem; font-weight: 700; }
+    .game-settings-option input { accent-color: #55bfff; }
+    .game-settings-panel p { margin: .45rem 0 0 1.45rem; color: #7594a7; font-size: .65rem; line-height: 1.35; }
     .control-button {
       display: inline-flex;
       align-items: center;
@@ -183,6 +203,14 @@
       border-color: rgba(181, 219, 198, .2);
       background: rgba(115, 155, 134, .1);
       font-size: .76rem;
+    }
+    .control-button:hover,
+    .control-button:active,
+    .control-button:focus-visible,
+    .game-settings-menu[open] > summary {
+      color: #edf8ff;
+      border-color: rgba(91, 184, 255, .62);
+      background: rgba(20, 119, 190, .32);
     }
     .control-button svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
     #mute.is-muted .sound-wave,
@@ -473,6 +501,61 @@
     .mode-choice-card img { width: 2.8rem; height: 2.8rem; object-fit: contain; }
     .mode-choice-card .choice-label { padding: .25rem; text-align: left; white-space: normal; }
     .wizard-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .7rem; }
+    .advanced-settings {
+      margin-top: .7rem;
+      border: 1px solid rgba(91, 184, 255, .2);
+      border-radius: .45rem;
+      background: rgba(4, 24, 42, .42);
+    }
+    .advanced-settings > summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .6rem;
+      padding: .58rem .65rem;
+      color: #b9d9eb;
+      cursor: pointer;
+      font-size: .76rem;
+      font-weight: 700;
+      list-style: none;
+    }
+    .advanced-settings > summary::-webkit-details-marker { display: none; }
+    .advanced-settings > summary::after { color: #67c9ff; content: "+"; font-size: 1rem; }
+    .advanced-settings[open] > summary::after { content: "−"; }
+    .advanced-settings-optional { color: #718fa1; font-size: .62rem; font-weight: 500; }
+    .advanced-settings-body { display: grid; gap: .65rem; padding: 0 .65rem .7rem; }
+    .advanced-toggle,
+    .advanced-check {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      color: #bdd2de;
+      font-size: .72rem;
+    }
+    .advanced-toggle { padding-bottom: .55rem; border-bottom: 1px solid rgba(91, 184, 255, .14); }
+    .advanced-toggle input,
+    .advanced-check input { accent-color: #55bfff; }
+    .advanced-fields {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: .55rem;
+      margin: 0;
+      padding: 0;
+      border: 0;
+    }
+    .advanced-fields:disabled { opacity: .42; }
+    .advanced-number { display: grid; gap: .28rem; color: #8eabba; font-size: .64rem; }
+    .advanced-number input {
+      min-width: 0;
+      width: 100%;
+      padding: .42rem .5rem;
+      border: 1px solid rgba(112, 190, 235, .25);
+      border-radius: .3rem;
+      color: #e7f5fc;
+      background: rgba(0, 8, 16, .5);
+      font: .74rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .advanced-checks { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .42rem .7rem; }
     .join-direct { margin-top: .7rem; color: #8fa1aa; font-size: .76rem; }
     .join-direct summary { width: fit-content; cursor: pointer; }
     #online-wizard:has(#online-setup[hidden]) #online-wizard-steps { display: none; }
@@ -637,6 +720,31 @@
       letter-spacing: .1em;
       text-transform: uppercase;
     }
+    .live-player-count {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: .32rem;
+      width: fit-content;
+      color: rgba(151, 194, 218, .66);
+      font: 600 .56rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: .055em;
+      text-transform: uppercase;
+    }
+    .live-player-count::before {
+      width: .34rem;
+      height: .34rem;
+      border-radius: 50%;
+      background: rgba(88, 201, 153, .72);
+      box-shadow: 0 0 .45rem rgba(88, 201, 153, .36);
+      content: "";
+    }
+    .live-player-count-item + .live-player-count-item::before {
+      margin-right: .32rem;
+      color: rgba(151, 194, 218, .32);
+      content: "·";
+    }
     #online {
       width: 100%;
       min-height: 2.55rem;
@@ -783,16 +891,6 @@
         linear-gradient(90deg, rgba(1, 7, 18, .24), transparent 22%, transparent 78%, rgba(1, 7, 18, .24)),
         radial-gradient(circle at 58% 50%, rgba(5, 39, 73, .18), transparent 44%);
     }
-    main::after {
-      content: "";
-      position: absolute;
-      inset: clamp(.7rem, 2vw, 1.4rem);
-      z-index: 4;
-      opacity: .11;
-      background: url("assets/ui/shell/hud-frame.png") center / 100% 100% no-repeat;
-      filter: saturate(.8);
-      pointer-events: none;
-    }
     #game-frame {
       position: absolute;
       left: calc(50% + 7.5rem);
@@ -826,14 +924,7 @@
       max-width: 100%;
       max-height: none;
       aspect-ratio: 16 / 9;
-      border: 1px solid rgba(73, 190, 255, .78);
       background: #02050b;
-      box-shadow:
-        0 0 0 4px rgba(2, 17, 35, .88),
-        0 0 0 5px rgba(28, 156, 237, .45),
-        0 0 2rem rgba(10, 119, 198, .3),
-        0 1.8rem 5rem rgba(0, 0, 0, .64);
-      clip-path: polygon(1.1rem 0, calc(100% - 1.1rem) 0, 100% 1.1rem, 100% calc(100% - 1.1rem), calc(100% - 1.1rem) 100%, 1.1rem 100%, 0 calc(100% - 1.1rem), 0 1.1rem);
       transform: scaleY(-1);
     }
     #campaign-loading {
@@ -939,9 +1030,6 @@
       max-height: 100%;
       transform: none;
     }
-    #game-area:fullscreen #game-frame::before {
-      display: none;
-    }
     #game-area:fullscreen canvas.emscripten.ready {
       position: absolute;
       inset: 0;
@@ -1046,8 +1134,6 @@
     .about-copy a { color: #71c8f6; text-underline-offset: .16em; }
     .about-copy a:hover { color: #c9eeff; }
     .about-support { list-style: none; margin-left: -1rem; }
-    .kofi-banner { display: inline-block; border-radius: .4rem; line-height: 0; }
-    .kofi-banner img { display: block; width: 9.5rem; max-width: 100%; height: auto; }
     #about-close { position: absolute; top: .62rem; right: .62rem; z-index: 1; }
 
     #loading {
@@ -1180,6 +1266,40 @@
     progress::-webkit-progress-value { background: linear-gradient(90deg, #076fbc, #70d9ff); box-shadow: 0 0 .6rem rgba(72, 195, 255, .65); }
     progress::-moz-progress-bar { background: linear-gradient(90deg, #076fbc, #70d9ff); }
 
+    #xiso-dialog {
+      width: min(26rem, calc(100% - 1.25rem));
+      height: min(19rem, calc(100% - 1.25rem));
+      min-height: 0;
+      max-height: calc(100% - 2rem);
+      padding: 0;
+      overflow: auto;
+    }
+    .xiso-card {
+      display: grid;
+      gap: .72rem;
+      padding: clamp(1rem, 3vw, 1.35rem);
+    }
+    .xiso-card h1 {
+      margin: 0;
+      color: #e4f4ff;
+      font-size: clamp(1.15rem, 4vw, 1.4rem);
+      line-height: 1.1;
+    }
+    .xiso-card p { margin: 0; color: #aac0ce; font-size: .75rem; line-height: 1.45; }
+    .xiso-card a { color: #79d1ff; text-underline-offset: .16em; }
+    .xiso-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+    #xiso-file { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    #xiso-progress {
+      width: 100%;
+      height: .36rem;
+      border: 0;
+      accent-color: #39bfff;
+    }
+    #xiso-progress[hidden] { display: none; }
+    #xiso-status { min-height: 1.3rem; color: #bcd4e3; }
+    #xiso-status[data-state="error"] { color: #ffd0c7; }
+    #xiso-status[data-state="ready"] { color: #a8f1ca; }
+
     #diagnostics-overlay,
     dialog {
       border-color: rgba(41, 167, 246, .66);
@@ -1264,7 +1384,6 @@
         width: min(calc(100% - 1.5rem), calc(177.7778dvh - 7rem));
         max-width: calc(100% - 1.5rem);
       }
-      main::after { inset: .4rem; opacity: .07; }
       dialog { height: auto; overflow: auto; }
       .online-card { grid-template-columns: 1fr; min-height: 0; }
       .profile-panel {
@@ -1307,6 +1426,9 @@
       .mode-choice-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .mode-choice-card { grid-template-columns: 2.7rem minmax(0, 1fr); }
       .mode-choice-card img { width: 2.35rem; height: 2.35rem; }
+      .advanced-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .game-settings-menu > summary { width: 1.95rem; padding: .28rem; }
+      .game-settings-menu > summary span { display: none; }
       .diagnostics-stats { grid-template-columns: 1fr; }
       #player-sidebar { width: min(16rem, calc(100% - 1.5rem)); }
       #player-sidebar[data-collapsed="true"] #player-list,
@@ -1360,8 +1482,18 @@
           <button id="fullscreen" class="control-button icon-only" type="button" aria-label="Enter fullscreen" title="Fullscreen">
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M8 21H3v-5m13 5h5v-5"></path></svg>
           </button>
+          <details id="game-settings-menu" class="game-settings-menu">
+            <summary class="control-button" aria-label="Game settings">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.97 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.08A1.7 1.7 0 0 0 4.6 8.97a1.7 1.7 0 0 0-.34-1.88l-.06-.06L7.03 4.2l.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.08V3h4v.08a1.7 1.7 0 0 0 1.03 1.52 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"></path></svg>
+              <span>Game settings</span>
+            </summary>
+            <div class="game-settings-panel">
+              <label class="game-settings-option"><input id="disable-player-magnetism" type="checkbox"> Disable aim magnetism</label>
+              <p id="player-magnetism-note">Automatically off for keyboard and mouse, and on for a controller.</p>
+            </div>
+          </details>
         </div>
-        <span class="site-credit">Made by <a href="https://mitchellhynes.com/" target="_blank" rel="noopener noreferrer">Mitchell Hynes</a>. <button id="about-open" type="button">Learn more</button> / <a href="https://ko-fi.com/mitchellhynes" target="_blank" rel="noopener noreferrer">Buy me a coffee</a></span>
+        <span class="site-credit">Made by <a href="https://mitchellhynes.com/" target="_blank" rel="noopener noreferrer">Mitchell Hynes</a>. <button id="about-open" type="button">Learn more</button></span>
         <span id="footer-hint" class="hint">Click the game or Focus game to capture the mouse</span>
         <span id="isolation-warning"></span>
         <button id="logs" type="button" hidden>Diagnostics</button>
@@ -1400,6 +1532,11 @@
       <div class="sidebar-launch">
         <span class="sidebar-kicker">Online multiplayer</span>
         <button id="online" type="button" data-state="offline">Play online</button>
+        <div id="live-player-count" class="live-player-count" aria-live="polite" hidden>
+          <output id="live-player-online" class="live-player-count-item">0 players online</output>
+          <output id="live-player-campaign" class="live-player-count-item">0 players in campaign</output>
+          <output id="live-player-today" class="live-player-count-item">0 players today</output>
+        </div>
       </div>
       <section id="player-session" class="sidebar-roster" aria-labelledby="player-sidebar-title">
         <div class="player-sidebar-heading">
@@ -1449,6 +1586,20 @@
       <p class="diagnostics-shortcut">⌘/Ctrl + Shift + L</p>
     </section>
   </main>
+  <dialog id="xiso-dialog" aria-labelledby="xiso-title" aria-describedby="xiso-description" tabindex="-1">
+    <section class="xiso-card">
+      <h1 id="xiso-title">Choose your Halo XISO</h1>
+      <p id="xiso-description">To comply with copyright law and respect the original Halo CE decompilation team, this website does not provide Halo game data. Choose an XISO made from your own Xbox copy of <cite>Halo: Combat Evolved</cite>.</p>
+      <p>Need help making one? Visit <a href="https://discord.gg/DQRgPUq6B8" target="_blank" rel="noopener noreferrer">discord.gg/DQRgPUq6B8</a> for instructions on ripping your own disc.</p>
+      <input id="xiso-file" type="file" accept=".iso,.xiso,application/octet-stream" aria-label="Choose Halo XISO">
+      <div class="xiso-actions">
+        <button id="xiso-choose" class="primary" type="button">Choose XISO</button>
+        <span id="xiso-file-name" aria-live="polite"></span>
+      </div>
+      <progress id="xiso-progress" value="0" max="1" hidden></progress>
+      <p id="xiso-status" role="status" aria-live="polite">Waiting for your disc image.</p>
+    </section>
+  </dialog>
   <dialog id="about-dialog" aria-labelledby="about-title">
     <article class="about-card">
       <button id="about-close" class="icon-button" type="button" aria-label="Close">✕</button>
@@ -1463,7 +1614,6 @@
             <a href="https://github.com/cybersecurity/halo-ce-universal" target="_blank" rel="noopener noreferrer">cybersecurity/halo-ce-universal</a>.
           </li>
           <li>This web version is independently hosted and maintained by <a href="https://mitchellhynes.com/" target="_blank" rel="noopener noreferrer">Mitchell Hynes</a>. Those projects and contributors are not affiliated with or responsible for this website.</li>
-          <li class="about-support"><a class="kofi-banner" href="https://ko-fi.com/mitchellhynes" target="_blank" rel="noopener noreferrer"><img src="assets/ui/shell/kofi-support-dark.png" alt="Support me on Ko-fi"></a></li>
         </ul>
       </div>
     </article>
@@ -1590,6 +1740,24 @@
                   <option value="4">King of the Hill</option>
                   <option value="5">Race</option>
                 </select>
+                <details class="advanced-settings">
+                  <summary><span>Advanced settings</span><span class="advanced-settings-optional">Optional · stock rules by default</span></summary>
+                  <div class="advanced-settings-body">
+                    <label class="advanced-toggle"><input id="online-advanced-enabled" type="checkbox"> Customize this game</label>
+                    <fieldset id="online-advanced-fields" class="advanced-fields" disabled>
+                      <label class="advanced-number">Score to win<input id="online-score-to-win" type="number" min="1" max="1000" step="1" value="15"></label>
+                      <label class="advanced-number">Respawn (sec)<input id="online-respawn-seconds" type="number" min="0" max="30" step="1" value="0"></label>
+                      <label class="advanced-number">Lives (0 = ∞)<input id="online-lives" type="number" min="0" max="99" step="1" value="0"></label>
+                      <label class="advanced-number">Health %<input id="online-health-percent" type="number" min="25" max="400" step="25" value="100"></label>
+                      <div class="advanced-checks">
+                        <label class="advanced-check"><input id="online-shields" type="checkbox" checked> Shields</label>
+                        <label class="advanced-check"><input id="online-other-players-on-radar" type="checkbox" checked> Players on radar</label>
+                        <label class="advanced-check"><input id="online-infinite-grenades" type="checkbox"> Infinite grenades</label>
+                        <label class="advanced-check"><input id="online-invisible-players" type="checkbox"> Invisible players</label>
+                      </div>
+                    </fieldset>
+                  </div>
+                </details>
                 <div class="wizard-actions">
                   <button id="online-mode-back" type="button">Back</button>
                   <button id="online-host" class="primary" type="submit">Create link</button>
@@ -1638,7 +1806,17 @@
     const aboutButton = document.getElementById("about-open");
     const aboutDialog = document.getElementById("about-dialog");
     const aboutCloseButton = document.getElementById("about-close");
+    const xisoDialog = document.getElementById("xiso-dialog");
+    const xisoFileInput = document.getElementById("xiso-file");
+    const xisoChooseButton = document.getElementById("xiso-choose");
+    const xisoFileName = document.getElementById("xiso-file-name");
+    const xisoProgress = document.getElementById("xiso-progress");
+    const xisoStatus = document.getElementById("xiso-status");
     const onlineDialog = document.getElementById("online-dialog");
+    const gameSettingsMenu = document.getElementById("game-settings-menu");
+    const disablePlayerMagnetism = document.getElementById("disable-player-magnetism");
+    const playerMagnetismNote = document.getElementById("player-magnetism-note");
+    const GAME_SETTINGS_STORAGE_KEY = "halo.web.game-settings.v1";
     let audioMuted = true;
     let performancePrevious = null;
     let secretClickCount = 0;
@@ -1654,9 +1832,12 @@
     const telemetryStartedAt = performance.now();
     let telemetryLastFlush = telemetryStartedAt;
     let runtimeStage = "page";
+    let haloRuntimeReady = false;
     let runtimeGpuClass = "unknown";
     let runtimeRole = "offline";
     let runtimeConnection = "unknown";
+    let runtimeFirstFailureSent = false;
+    let runtimeCapabilities = null;
     let runtimeMapLoad = null;
     let runtimeOnlineState = null;
     let runtimeClientState = null;
@@ -1666,6 +1847,10 @@
     let audioTelemetryPreviousLateCallbacks = 0;
     let connectedControllerCount = 0;
     let gamepadDiscoveryFailed = false;
+    let playerMagnetismManual = false;
+    let playerInputMode = "keyboard-mouse";
+    let releaseXisoDependency = null;
+    let xisoInstallActive = false;
     const runtimeMapNames = [
       "a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40",
       "beavercreek", "bloodgulch", "boardingaction", "carousel", "chillout", "damnation",
@@ -1687,6 +1872,89 @@
     const performanceMinimumWindow = 750;
     const performanceMaximumWindow = 2500;
 
+    function showXisoGate(message = "Waiting for your disc image.") {
+      xisoStatus.dataset.state = "waiting";
+      xisoStatus.textContent = message;
+      if (!xisoDialog.open) xisoDialog.showModal();
+      try { xisoDialog.focus({ preventScroll: true }); } catch (_error) { xisoDialog.focus(); }
+    }
+
+    function finishXisoGate() {
+      if (!releaseXisoDependency) return;
+      const release = releaseXisoDependency;
+      releaseXisoDependency = null;
+      if (xisoDialog.open) xisoDialog.close();
+      setStatus("Starting Halo…");
+      release();
+    }
+
+    async function beginXisoGate() {
+      addRunDependency("halo-xiso");
+      let released = false;
+      releaseXisoDependency = () => {
+        if (released) return;
+        released = true;
+        removeRunDependency("halo-xiso");
+      };
+      try {
+        if (!globalThis.HaloXiso) {
+          throw new Error("The local XISO reader did not load.");
+        }
+        if (await globalThis.HaloXiso.isInstalled()) {
+          finishXisoGate();
+          return;
+        }
+        showXisoGate();
+      } catch (error) {
+        showXisoGate(error && error.message ? error.message : "Local game storage is unavailable.");
+        xisoStatus.dataset.state = "error";
+      }
+    }
+
+    async function installSelectedXiso(file) {
+      if (!file || xisoInstallActive || !globalThis.HaloXiso) return;
+      xisoInstallActive = true;
+      xisoChooseButton.disabled = true;
+      xisoChooseButton.textContent = "Reading XISO…";
+      xisoFileName.textContent = file.name;
+      xisoProgress.hidden = true;
+      xisoStatus.dataset.state = "working";
+      try {
+        await globalThis.HaloXiso.install(file, progress => {
+          if (progress.phase === "catalog") {
+            xisoStatus.textContent = progress.message;
+            return;
+          }
+          if (progress.phase === "copy") {
+            xisoProgress.hidden = false;
+            xisoProgress.max = progress.totalBytes;
+            xisoProgress.value = progress.completedBytes;
+            const percent = Math.floor(progress.completedBytes * 100 / progress.totalBytes);
+            xisoStatus.textContent = `Preparing local game data… ${percent}% · ${progress.name}`;
+          }
+        });
+        xisoStatus.dataset.state = "ready";
+        xisoStatus.textContent = "Game data is ready. Starting Halo…";
+        finishXisoGate();
+      } catch (error) {
+        xisoStatus.dataset.state = "error";
+        xisoStatus.textContent = error && error.message
+          ? error.message
+          : "That XISO could not be read. Choose your Halo Xbox disc image and try again.";
+        xisoChooseButton.disabled = false;
+        xisoChooseButton.textContent = "Choose another XISO";
+        xisoFileInput.value = "";
+      } finally {
+        xisoInstallActive = false;
+      }
+    }
+
+    xisoChooseButton.addEventListener("click", () => xisoFileInput.click());
+    xisoFileInput.addEventListener("change", () => installSelectedXiso(xisoFileInput.files[0]));
+    xisoDialog.addEventListener("cancel", event => event.preventDefault());
+    xisoDialog.addEventListener("close", () => {
+      if (releaseXisoDependency) showXisoGate("Choose your Halo XISO to continue.");
+    });
     function percentile(values, fraction) {
       const sorted = [...values].sort((left, right) => left - right);
       return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * fraction) - 1))];
@@ -1695,7 +1963,7 @@
     function memoryBytes() {
       const js = performance.memory && Number.isFinite(performance.memory.usedJSHeapSize)
         ? performance.memory.usedJSHeapSize : 0;
-      const wasm = typeof Module !== "undefined" &&
+      const wasm = haloRuntimeReady && typeof Module !== "undefined" &&
         typeof Module._platform_web_profile_memory_bytes === "function"
         ? Module._platform_web_profile_memory_bytes()
         : (typeof Module !== "undefined" && Module.HEAPU8 && Module.HEAPU8.buffer
@@ -1709,6 +1977,7 @@
     }
 
     function moduleMetric(name, fallback = -1) {
+      if (!haloRuntimeReady) return fallback;
       const fn = typeof Module !== "undefined" && Module[name];
       if (typeof fn !== "function") return fallback;
       try {
@@ -1731,8 +2000,86 @@
       return renderer ? "other" : "unknown";
     }
 
+    function detectWebglCapability() {
+      try {
+        const probe = document.createElement("canvas");
+        for (const name of ["webgl2", "webgl"]) {
+          const context = probe.getContext(name);
+          if (!context) continue;
+          const extension = context.getExtension("WEBGL_lose_context");
+          if (extension) extension.loseContext();
+          return name;
+        }
+      } catch (_error) {
+        // Capability telemetry must never interfere with startup.
+      }
+      return "unavailable";
+    }
+
+    function runtimeCapabilitySnapshot() {
+      if (runtimeCapabilities) return runtimeCapabilities;
+      runtimeCapabilities = Object.freeze({
+        isolation: self.crossOriginIsolated === true ? "isolated" : "not-isolated",
+        sharedMemory: typeof SharedArrayBuffer === "function" ? "available" : "unavailable",
+        webgl: detectWebglCapability(),
+        gamepadApi: typeof navigator.getGamepads === "function" ? "available" : "unavailable",
+        hardwareConcurrency: Number.isFinite(navigator.hardwareConcurrency)
+          ? navigator.hardwareConcurrency : 0,
+        deviceMemoryGb: Number.isFinite(navigator.deviceMemory) ? navigator.deviceMemory : 0,
+      });
+      return runtimeCapabilities;
+    }
+
+    function normalizeTelemetryError(value) {
+      return String(value || "unknown error")
+        .toLowerCase()
+        .replace(/\b(?:https?|blob|file):\/\/\S+/gu, "<url>")
+        .replace(/\b(?:chrome|moz|safari|ms-browser)-extension:\/\/\S+/gu, "<extension>")
+        .replace(/\b(?:0x)?[0-9a-f]{8,}\b/gu, "<id>")
+        .replace(/\b\d+(?:[.:]\d+)*\b/gu, "#")
+        .replace(/\s+/gu, " ")
+        .trim()
+        .slice(0, 320);
+    }
+
+    function telemetryHash(value) {
+      let first = 0x811c9dc5;
+      let second = 0x9e3779b1;
+      for (let index = 0; index < value.length; index++) {
+        const code = value.charCodeAt(index);
+        first = Math.imul(first ^ code, 0x01000193);
+        second = Math.imul(second ^ code, 0x85ebca6b);
+      }
+      return `${(first >>> 0).toString(16).padStart(8, "0")}${
+        (second >>> 0).toString(16).padStart(8, "0")}`;
+    }
+
+    function classifyRuntimeError(value) {
+      const message = normalizeTelemetryError(value);
+      if (/out of memory|cannot enlarge memory|webassembly\.memory|memory access out of bounds|allocation failed/u.test(message)) return "wasm-memory";
+      if (/sharedarraybuffer|cross.origin|atomics|pthread|emscripten_proxy_async/u.test(message)) return "threading";
+      if (/getgamepads|gamepad|joystick/u.test(message)) return "gamepad";
+      if (/webgl|gl_invalid|graphics context|renderer/u.test(message)) return "graphics";
+      if (/audiocontext|audio worklet|audio device|scriptprocessor/u.test(message)) return "audio";
+      if (/failed to fetch|networkerror|load failed|network request/u.test(message)) return "network";
+      if (/securityerror|not allowed|permission denied/u.test(message)) return "permission";
+      if (/runtimeerror|unreachable|abort/u.test(message)) return "wasm-runtime";
+      if (/typeerror|is not a function|cannot read propert/u.test(message)) return "javascript-type";
+      return "unknown";
+    }
+
+    function telemetryTopFrame(source) {
+      for (const line of String(source || "").split("\n")) {
+        const match = line.match(/^\s*at\s+(?:async\s+)?([A-Za-z_$][\w$.:~-]*)/u) ||
+          line.match(/^\s*([A-Za-z_$][\w$.:~-]*)@/u);
+        if (match) return match[1].slice(0, 64);
+      }
+      return "none";
+    }
+
     function sendRuntimeTelemetry(event, stage = runtimeStage, details = {}) {
       if (/^(localhost|127\.0\.0\.1)$/u.test(location.hostname)) return;
+      const capabilities = runtimeCapabilitySnapshot();
       const payload = JSON.stringify({
         sessionId: telemetrySessionId,
         buildId: telemetryBuildId(),
@@ -1752,6 +2099,17 @@
         viewportWidth: innerWidth,
         viewportHeight: innerHeight,
         dpr: devicePixelRatio || 1,
+        errorCategory: details.errorCategory || "none",
+        errorFingerprint: details.errorFingerprint || "none",
+        errorTopFrame: details.errorTopFrame || "none",
+        visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState)
+          ? document.visibilityState : "unknown",
+        isolation: capabilities.isolation,
+        sharedMemory: capabilities.sharedMemory,
+        webgl: capabilities.webgl,
+        gamepadApi: capabilities.gamepadApi,
+        hardwareConcurrency: capabilities.hardwareConcurrency,
+        deviceMemoryGb: capabilities.deviceMemoryGb,
         platform: navigator.userAgentData && navigator.userAgentData.platform
           ? navigator.userAgentData.platform : (navigator.platform || "unknown"),
         mobile: Boolean(navigator.userAgentData && navigator.userAgentData.mobile),
@@ -1769,9 +2127,28 @@
       }).catch(() => {});
     }
 
+    function sendRuntimeFailure(event, reason, source = "") {
+      if (runtimeFirstFailureSent) return;
+      runtimeFirstFailureSent = true;
+      const message = reason && reason.message ? reason.message : String(reason || "unknown error");
+      const name = reason && reason.name ? reason.name : "Error";
+      const normalized = normalizeTelemetryError(`${name}: ${message}`);
+      sendRuntimeTelemetry(event, runtimeStage, {
+        errorCategory: classifyRuntimeError(normalized),
+        errorFingerprint: telemetryHash(`${normalized}|${telemetryTopFrame(source)}`),
+        errorTopFrame: telemetryTopFrame(source),
+      });
+    }
+
     window.HaloTelemetry = Object.freeze({
       event(event, stage, details) {
         sendRuntimeTelemetry(event, stage, details || {});
+      },
+      presence() {
+        return {
+          campaign: moduleMetric("_platform_web_campaign_active", 0) > 0,
+          sessionId: telemetrySessionId,
+        };
       },
       setContext(context) {
         if (context && ["offline", "host", "guest", "unknown"].includes(context.role)) {
@@ -2070,6 +2447,66 @@
       if (!audioMuted) refreshAudioState();
     }
 
+    function applyPlayerMagnetism() {
+      const enabled = !disablePlayerMagnetism.checked;
+      if (typeof Module !== "undefined" &&
+          typeof Module._platform_web_set_player_magnetism_enabled === "function") {
+        Module._platform_web_set_player_magnetism_enabled(enabled ? 1 : 0);
+      }
+    }
+
+    try {
+      const savedGameSettings = JSON.parse(localStorage.getItem(GAME_SETTINGS_STORAGE_KEY));
+      // Settings saved by the earlier on/off UI necessarily came from a
+      // player click, so treat them as manual even without the newer marker.
+      playerMagnetismManual = !!(savedGameSettings &&
+        Object.prototype.hasOwnProperty.call(savedGameSettings, "disablePlayerMagnetism"));
+      disablePlayerMagnetism.checked = playerMagnetismManual ?
+        !!savedGameSettings.disablePlayerMagnetism : true;
+    } catch (error) {
+      playerMagnetismManual = false;
+      disablePlayerMagnetism.checked = true;
+    }
+    function updatePlayerMagnetismNote() {
+      if (playerMagnetismManual) {
+        playerMagnetismNote.textContent = "Manual preference saved on this device. Automatic input switching is off.";
+      } else {
+        playerMagnetismNote.textContent = playerInputMode === "controller" ?
+          "Controller active · aim magnetism is on." :
+          "Keyboard and mouse active · aim magnetism is off.";
+      }
+    }
+    function setAutomaticInputMode(mode) {
+      if (playerMagnetismManual || mode === playerInputMode) return;
+      playerInputMode = mode;
+      disablePlayerMagnetism.checked = mode !== "controller";
+      updatePlayerMagnetismNote();
+      applyPlayerMagnetism();
+    }
+    updatePlayerMagnetismNote();
+    disablePlayerMagnetism.addEventListener("change", () => {
+      playerMagnetismManual = true;
+      try {
+        localStorage.setItem(GAME_SETTINGS_STORAGE_KEY, JSON.stringify({
+          disablePlayerMagnetism: disablePlayerMagnetism.checked,
+          playerMagnetismManual: true,
+        }));
+      } catch (error) {
+        // Storage can be unavailable in strict private browsing; the manual
+        // preference still remains fixed for this page load.
+      }
+      updatePlayerMagnetismNote();
+      applyPlayerMagnetism();
+    });
+    ["keydown", "keyup", "keypress"].forEach(type => {
+      gameSettingsMenu.addEventListener(type, event => event.stopPropagation());
+    });
+    document.addEventListener("pointerdown", event => {
+      if (gameSettingsMenu.open && !gameSettingsMenu.contains(event.target)) {
+        gameSettingsMenu.removeAttribute("open");
+      }
+    });
+
     function formatBytes(value) {
       if (!Number.isFinite(value) || value < 0) return "Unavailable";
       const units = ["B", "KB", "MB", "GB"];
@@ -2221,11 +2658,17 @@
       }
       if (!pads.length) {
         controllerSummary = "";
+        if (playerInputMode === "controller") setAutomaticInputMode("keyboard-mouse");
       } else if (pads.length === 1) {
         const name = pads[0].id ? pads[0].id.split("(")[0].trim() : "Controller";
         controllerSummary = `${name || "Controller"} ready · Player 1`;
       } else {
         controllerSummary = `${Math.min(pads.length, 4)} controllers detected`;
+      }
+      if (pads.some(gamepad =>
+        Array.from(gamepad.buttons || []).some(button => button && (button.pressed || button.value > .5)) ||
+        Array.from(gamepad.axes || []).some(axis => Math.abs(axis) > .35))) {
+        setAutomaticInputMode("controller");
       }
       updatePointerLockUi();
     }
@@ -2325,19 +2768,29 @@
       secretClickTimer = window.setTimeout(() => { secretClickCount = 0; }, 700);
     });
     canvas.addEventListener("pointerdown", () => {
+      setAutomaticInputMode("keyboard-mouse");
       focusCanvas();
       if (!audioMuted) resumeBrowserAudio();
+    });
+    canvas.addEventListener("mousemove", event => {
+      if (document.pointerLockElement === canvas && (event.movementX || event.movementY)) {
+        setAutomaticInputMode("keyboard-mouse");
+      }
     });
 
     function webUiOwnsKeyboardFocus() {
       const active = document.activeElement;
-      if (!diagnosticsOverlay.hidden || onlineDialog.open || aboutDialog.open) return true;
+      if (!diagnosticsOverlay.hidden || onlineDialog.open || aboutDialog.open ||
+          xisoDialog.open || gameSettingsMenu.open) return true;
       return active && active !== canvas && typeof active.matches === "function" &&
         active.matches("input, select, textarea, button, summary, [contenteditable='true']");
     }
 
     document.addEventListener("keydown", event => {
       const gameOwnsKeyboard = document.pointerLockElement === canvas || document.activeElement === canvas;
+      if (gameOwnsKeyboard && !webUiOwnsKeyboardFocus()) {
+        setAutomaticInputMode("keyboard-mouse");
+      }
       if (event.key === "Tab" && gameOwnsKeyboard && !webUiOwnsKeyboardFocus()) {
         // Keep Tab available to SDL/Halo (weapon switch) while suppressing the
         // browser's default focus traversal. Do not stop propagation here.
@@ -2402,10 +2855,13 @@
       fullscreenButton.setAttribute("aria-label", expanded ? "Exit fullscreen" : "Enter fullscreen");
       fullscreenButton.title = expanded ? "Exit fullscreen" : "Fullscreen";
     });
-    window.addEventListener("gamepadconnected", refreshControllerStatus);
+    window.addEventListener("gamepadconnected", event => {
+      setAutomaticInputMode("controller");
+      refreshControllerStatus(event);
+    });
     window.addEventListener("gamepaddisconnected", refreshControllerStatus);
     window.addEventListener("focus", refreshControllerStatus);
-    window.setInterval(refreshControllerStatus, 1000);
+    window.setInterval(refreshControllerStatus, 250);
     document.getElementById("player-sidebar-toggle").addEventListener("click", event => {
       const sidebar = document.getElementById("player-sidebar");
       const collapsed = sidebar.dataset.collapsed !== "true";
@@ -2439,6 +2895,10 @@
       const poll = now => {
         presentationFrameRequest = 0;
         if (gamePresented || token !== presentationWaitToken) return;
+        if (!haloRuntimeReady) {
+          presentationFrameRequest = window.requestAnimationFrame(poll);
+          return;
+        }
         const loops = typeof Module !== "undefined" && Module._platform_web_profile_loops;
         const swaps = typeof Module !== "undefined" && Module._platform_web_profile_swaps;
         if (typeof loops !== "function" || typeof swaps !== "function") {
@@ -2514,6 +2974,7 @@
 
     var Module = {
       canvas,
+      preRun: [beginXisoGate],
       print: (...args) => {
         const line = args.join(" ");
         const performancePrefix = "HALO_PERF:";
@@ -2547,9 +3008,11 @@
           : "Starting Halo…");
       },
       onRuntimeInitialized() {
+        haloRuntimeReady = true;
         runtimeStage = "runtime-initialized";
         sendRuntimeTelemetry("runtime_initialized", runtimeStage);
         applyMute();
+        applyPlayerMagnetism();
         if (window.HaloOnline) {
           window.HaloOnline.runtimeReady();
         }
@@ -2564,7 +3027,7 @@
       },
       onAbort(reason) {
         diagnostic(`abort: ${reason}`);
-        sendRuntimeTelemetry("runtime_abort", runtimeStage);
+        sendRuntimeFailure("runtime_abort", reason);
         setStatus(`Aborted: ${reason || "the runtime stopped"}`);
       },
     };
@@ -2596,7 +3059,7 @@
         return;
       }
       diagnostic(source || message);
-      sendRuntimeTelemetry("runtime_error", runtimeStage);
+      sendRuntimeFailure("runtime_error", event.error || message, source);
       setStatus(`Could not start: ${message}`);
     });
     window.addEventListener("unhandledrejection", event => {
@@ -2612,7 +3075,7 @@
         return;
       }
       diagnostic(source || message);
-      sendRuntimeTelemetry("runtime_error", runtimeStage);
+      sendRuntimeFailure("runtime_error", event.reason || message, source);
       setStatus(`Could not start: ${message}`);
     });
   </script>

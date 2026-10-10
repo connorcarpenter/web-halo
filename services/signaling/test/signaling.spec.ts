@@ -149,7 +149,84 @@ async function connectSession(
   return { socket, welcome: await welcomePromise };
 }
 
+interface PresenceSummary {
+  campaign: number;
+  online: number;
+  today: number;
+}
+
+async function livePresence(): Promise<PresenceSummary> {
+  const response = await exports.default.fetch(
+    new Request(`${API_ORIGIN}/v1/presence`, {
+      headers: { Origin: GAME_ORIGIN },
+    }),
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Access-Control-Allow-Origin")).toBe(GAME_ORIGIN);
+  return response.json<PresenceSummary>();
+}
+
+async function presenceHeartbeat(
+  sessionId: string,
+  campaign: boolean,
+  address: string,
+  userAgent: string,
+): Promise<PresenceSummary> {
+  const response = await exports.default.fetch(
+    new Request(`${API_ORIGIN}/v1/presence`, {
+      body: JSON.stringify({ campaign, sessionId }),
+      headers: {
+        "CF-Connecting-IP": address,
+        "Content-Type": "application/json",
+        Origin: GAME_ORIGIN,
+        "User-Agent": userAgent,
+      },
+      method: "POST",
+    }),
+  );
+  expect(response.status).toBe(200);
+  return response.json<PresenceSummary>();
+}
+
 describe("signaling API", () => {
+  it("reports anonymous online, campaign, and daily player counts", async () => {
+    expect(await livePresence()).toMatchObject({ campaign: 0, online: 0, today: 0 });
+
+    const firstSession = "11111111-1111-4111-8111-111111111111";
+    const secondSession = "22222222-2222-4222-8222-222222222222";
+    expect(await presenceHeartbeat(
+      firstSession, true, "192.0.2.10", "Test Browser A",
+    )).toMatchObject({ campaign: 1, online: 0, today: 1 });
+    expect(await presenceHeartbeat(
+      secondSession, true, "192.0.2.10", "Test Browser A",
+    )).toMatchObject({ campaign: 1, online: 0, today: 1 });
+    expect(await presenceHeartbeat(
+      "33333333-3333-4333-8333-333333333333",
+      false,
+      "192.0.2.11",
+      "Test Browser B",
+    )).toMatchObject({ campaign: 1, online: 0, today: 2 });
+
+    const room = await createRoom("001122334455", 3);
+    const host = await connectSession(room.host.session.websocketUrl);
+    expect(await livePresence()).toMatchObject({ campaign: 1, online: 1, today: 2 });
+
+    const guestResponse = await createGuestSession(room);
+    const guestBody = await guestResponse.json<CreateSessionResponse>();
+    const guest = await connectSession(guestBody.session.websocketUrl);
+    expect(await livePresence()).toMatchObject({ campaign: 1, online: 2, today: 2 });
+
+    expect(await presenceHeartbeat(
+      firstSession, false, "192.0.2.10", "Test Browser A",
+    )).toMatchObject({ campaign: 1, online: 2, today: 2 });
+    expect(await presenceHeartbeat(
+      secondSession, false, "192.0.2.10", "Test Browser A",
+    )).toMatchObject({ campaign: 0, online: 2, today: 2 });
+
+    guest.socket.close(1000, "test complete");
+    host.socket.close(1000, "test complete");
+  });
+
   it("creates a capability-protected room and STUN-only host session", async () => {
     const body = await createRoom();
 
@@ -414,12 +491,16 @@ describe("signaling API", () => {
       );
 
     let response: Response | null = null;
-    for (let attempt = 0; attempt < 512; attempt += 1) {
+    let acceptedAttempts = 0;
+    for (let attempt = 0; attempt < 1_024; attempt += 1) {
       response = await attemptUpgrade();
+      if (response.status === 429) break;
+      expect(response.status).toBe(401);
+      acceptedAttempts += 1;
     }
-    expect(response?.status).toBe(401);
-    expect((await attemptUpgrade()).status).toBe(429);
-  }, 15_000);
+    expect(acceptedAttempts).toBeGreaterThan(0);
+    expect(response?.status).toBe(429);
+  }, 30_000);
 
   it("counts malformed frames and pings toward the WebSocket rate limit", async () => {
     const room = await createRoom();

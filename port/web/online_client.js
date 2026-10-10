@@ -13,6 +13,7 @@
   var ROOM_CAPACITY = 128;
   var MAX_PENDING_SIGNALING_MESSAGES = ROOM_CAPACITY * 128;
   var HEARTBEAT_MILLISECONDS = 40000;
+  var PRESENCE_POLL_MILLISECONDS = 30000;
   var GAME_POLL_MILLISECONDS = 200;
   var TURNSTILE_RENDER_ATTEMPTS = 80;
   var HOST_SETTINGS_STORAGE_KEY = "halo.web.host-settings.v1";
@@ -20,6 +21,14 @@
   var PLAYER_NAME_MAXIMUM_LENGTH = 11;
   var LAST_MAP_INDEX = 12;
   var LAST_MODE_INDEX = 5;
+  var ADVANCED_MODE_DEFAULTS = Object.freeze([
+    { scoreToWin: 15, respawnSeconds: 0 },
+    { scoreToWin: 50, respawnSeconds: 10 },
+    { scoreToWin: 3, respawnSeconds: 10 },
+    { scoreToWin: 2, respawnSeconds: 5 },
+    { scoreToWin: 2, respawnSeconds: 5 },
+    { scoreToWin: 3, respawnSeconds: 0 },
+  ]);
   var PLAYER_STYLES = Object.freeze([
     "white", "black", "red", "blue", "sage", "yellow", "lime", "pink", "purple",
     "cyan", "cornflower", "orange", "teal", "forest", "brown", "tan", "maroon", "rose",
@@ -116,7 +125,9 @@
     hostSettings: null,
     guestWasJoined: false,
     leavePromise: null,
+    joinRequested: false,
     wizardStep: "map",
+    presenceTimer: 0,
   };
 
   function byId(id) {
@@ -150,6 +161,16 @@
     elements.mode = byId("online-mode");
     elements.mapOptions = byId("online-map-options");
     elements.modeOptions = byId("online-mode-options");
+    elements.advancedEnabled = byId("online-advanced-enabled");
+    elements.advancedFields = byId("online-advanced-fields");
+    elements.scoreToWin = byId("online-score-to-win");
+    elements.respawnSeconds = byId("online-respawn-seconds");
+    elements.lives = byId("online-lives");
+    elements.healthPercent = byId("online-health-percent");
+    elements.infiniteGrenades = byId("online-infinite-grenades");
+    elements.shields = byId("online-shields");
+    elements.invisiblePlayers = byId("online-invisible-players");
+    elements.otherPlayersOnRadar = byId("online-other-players-on-radar");
     elements.joinForm = byId("online-join-form");
     elements.code = byId("online-code");
     elements.join = byId("online-join");
@@ -190,6 +211,63 @@
     elements.playerCount = byId("player-count");
     elements.playerEmpty = byId("player-empty");
     elements.playerSidebarToggle = byId("player-sidebar-toggle");
+    elements.livePlayerCount = byId("live-player-count");
+    elements.livePlayerOnline = byId("live-player-online");
+    elements.livePlayerCampaign = byId("live-player-campaign");
+    elements.livePlayerToday = byId("live-player-today");
+  }
+
+  function playerCountLabel(count, suffix) {
+    return count + (count === 1 ? " player " : " players ") + suffix;
+  }
+
+  async function refreshLivePlayerCount() {
+    if (!elements.livePlayerCount || document.hidden) return;
+    try {
+      var snapshot = global.HaloTelemetry &&
+        typeof global.HaloTelemetry.presence === "function"
+        ? global.HaloTelemetry.presence() : null;
+      var result = await fetchJson("/v1/presence", snapshot ? {
+        body: JSON.stringify(snapshot),
+        cache: "no-store",
+        method: "POST",
+      } : {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+        method: "GET",
+      });
+      if (
+        !Number.isInteger(result.online) || result.online < 0 ||
+        !Number.isInteger(result.campaign) || result.campaign < 0 ||
+        !Number.isInteger(result.today) || result.today < 0
+      ) return;
+      elements.livePlayerOnline.textContent = playerCountLabel(result.online, "online");
+      elements.livePlayerCampaign.textContent = playerCountLabel(result.campaign, "in campaign");
+      elements.livePlayerToday.textContent = playerCountLabel(result.today, "today");
+      elements.livePlayerCount.setAttribute(
+        "aria-label",
+        playerCountLabel(result.online, "online") + ", " +
+        playerCountLabel(result.campaign, "in campaign") + ", " +
+        playerCountLabel(result.today, "today"),
+      );
+      elements.livePlayerCount.hidden = false;
+    } catch (error) {
+      /* Presence is decorative and must never interfere with the game. */
+    }
+  }
+
+  function startPresencePolling() {
+    if (!elements.livePlayerCount || !elements.livePlayerOnline ||
+        !elements.livePlayerCampaign || !elements.livePlayerToday) return;
+    refreshLivePlayerCount();
+    if (session.presenceTimer) global.clearInterval(session.presenceTimer);
+    session.presenceTimer = global.setInterval(
+      refreshLivePlayerCount,
+      PRESENCE_POLL_MILLISECONDS,
+    );
+    document.addEventListener("visibilitychange", function() {
+      if (!document.hidden) refreshLivePlayerCount();
+    });
   }
 
   function buildId() {
@@ -255,8 +333,7 @@
         !turnstileReady("create_room");
     }
     if (elements.joinProfile) {
-      elements.joinProfile.disabled = humanVerification.busy || !session.runtimeReady ||
-        !turnstileReady("join_room");
+      elements.joinProfile.disabled = humanVerification.busy;
     }
   }
 
@@ -331,8 +408,11 @@
           humanVerification.token = token;
           setVerificationState(
             "ready",
-            action === "join_room" ? "Verified — ready to join." : "Verified — ready to create your link.");
-          setStatus("");
+            action === "join_room"
+              ? (session.runtimeReady ? "Verified — ready to join." : "Verified — Halo is still loading.")
+              : "Verified — ready to create your link.");
+          if (action !== "join_room" || session.runtimeReady) setStatus("");
+          maybeStartRequestedJoin();
         },
         "error-callback": function() {
           if (generation !== humanVerification.generation) return;
@@ -379,6 +459,38 @@
     return token;
   }
 
+  function maybeStartRequestedJoin() {
+    if (!session.joinRequested || humanVerification.busy) return;
+    var invite = session.pendingInvite;
+    if (!invite) {
+      session.joinRequested = false;
+      setStatus("That invite is no longer available.", "error");
+      return;
+    }
+    if (!session.runtimeReady) {
+      setStatus("Halo is still loading. Your game will join automatically when it is ready.");
+      return;
+    }
+    if (!turnstileReady("join_room")) {
+      setStatus("Finishing human verification…");
+      renderTurnstile("join_room", humanVerification.state === "error");
+      return;
+    }
+    try {
+      readPlayerProfile();
+      session.joinRequested = false;
+      join(invite, consumeTurnstile("join_room")).catch(fail);
+    } catch (error) {
+      session.joinRequested = false;
+      setStatus(error.message, "error");
+    }
+  }
+
+  function requestJoinFromProfile() {
+    session.joinRequested = true;
+    maybeStartRequestedJoin();
+  }
+
   function showDialog() {
     if (!elements.dialog.open) elements.dialog.showModal();
   }
@@ -422,6 +534,7 @@
     elements.code.disabled = !!busy;
     if (elements.mapNext) elements.mapNext.disabled = !!busy;
     if (elements.modeBack) elements.modeBack.disabled = !!busy;
+    syncAdvancedSettingsState(!!busy);
     syncVerificationButtons();
     setProfileLocked(!!busy || session.active);
   }
@@ -456,16 +569,18 @@
     syncPickerCards(elements.modeOptions, "halo-mode-choice", elements.mode);
   }
 
-  function attachPickerEvents(container, name, select) {
+  function attachPickerEvents(container, name, select, onChange) {
     if (!container || !select) return;
     container.addEventListener("change", function(event) {
       var input = event.target;
       if (!input || input.name !== name || input.disabled) return;
       select.value = input.value;
       syncPickerCards(container, name, select);
+      if (onChange) onChange();
     });
     select.addEventListener("change", function() {
       syncPickerCards(container, name, select);
+      if (onChange) onChange();
     });
   }
 
@@ -719,6 +834,88 @@
     return option ? option.textContent.trim() : "";
   }
 
+  function integerSetting(value, minimum, maximum, label) {
+    var parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+      throw new Error(label + " must be between " + minimum + " and " + maximum + ".");
+    }
+    return parsed;
+  }
+
+  function advancedDefaults(modeIndex) {
+    var preset = ADVANCED_MODE_DEFAULTS[modeIndex] || ADVANCED_MODE_DEFAULTS[0];
+    return {
+      scoreToWin: preset.scoreToWin,
+      respawnSeconds: preset.respawnSeconds,
+      lives: 0,
+      healthPercent: 100,
+      infiniteGrenades: false,
+      shields: true,
+      invisiblePlayers: false,
+      otherPlayersOnRadar: true,
+    };
+  }
+
+  function normalizeAdvancedSettings(value, modeIndex) {
+    if (!value) return null;
+    var defaults = advancedDefaults(modeIndex);
+    return {
+      scoreToWin: integerSetting(value.scoreToWin, 1, 1000, "Score to win"),
+      respawnSeconds: integerSetting(value.respawnSeconds, 0, 30, "Respawn delay"),
+      lives: integerSetting(value.lives, 0, 99, "Lives"),
+      healthPercent: integerSetting(value.healthPercent, 25, 400, "Health"),
+      infiniteGrenades: value.infiniteGrenades === undefined ?
+        defaults.infiniteGrenades : !!value.infiniteGrenades,
+      shields: value.shields === undefined ? defaults.shields : !!value.shields,
+      invisiblePlayers: value.invisiblePlayers === undefined ?
+        defaults.invisiblePlayers : !!value.invisiblePlayers,
+      otherPlayersOnRadar: value.otherPlayersOnRadar === undefined ?
+        defaults.otherPlayersOnRadar : !!value.otherPlayersOnRadar,
+    };
+  }
+
+  function readAdvancedSettings(modeIndex) {
+    if (!elements.advancedEnabled || !elements.advancedEnabled.checked) return null;
+    return normalizeAdvancedSettings({
+      scoreToWin: elements.scoreToWin.value,
+      respawnSeconds: elements.respawnSeconds.value,
+      lives: elements.lives.value,
+      healthPercent: elements.healthPercent.value,
+      infiniteGrenades: elements.infiniteGrenades.checked,
+      shields: elements.shields.checked,
+      invisiblePlayers: elements.invisiblePlayers.checked,
+      otherPlayersOnRadar: elements.otherPlayersOnRadar.checked,
+    }, modeIndex);
+  }
+
+  function writeAdvancedSettings(value, modeIndex) {
+    if (!elements.advancedEnabled || !elements.advancedFields) return;
+    var settings = value ? normalizeAdvancedSettings(value, modeIndex) : advancedDefaults(modeIndex);
+    elements.advancedEnabled.checked = !!value;
+    elements.scoreToWin.value = String(settings.scoreToWin);
+    elements.respawnSeconds.value = String(settings.respawnSeconds);
+    elements.lives.value = String(settings.lives);
+    elements.healthPercent.value = String(settings.healthPercent);
+    elements.infiniteGrenades.checked = settings.infiniteGrenades;
+    elements.shields.checked = settings.shields;
+    elements.invisiblePlayers.checked = settings.invisiblePlayers;
+    elements.otherPlayersOnRadar.checked = settings.otherPlayersOnRadar;
+    syncAdvancedSettingsState(false);
+  }
+
+  function syncAdvancedSettingsState(busy) {
+    if (!elements.advancedEnabled || !elements.advancedFields) return;
+    elements.advancedEnabled.disabled = !!busy;
+    elements.advancedFields.disabled = !!busy || !elements.advancedEnabled.checked;
+    elements.advancedFields.dataset.enabled = elements.advancedEnabled.checked ? "true" : "false";
+  }
+
+  function resetAdvancedDefaultsForMode() {
+    if (!elements.mode || !elements.advancedEnabled || elements.advancedEnabled.checked) return;
+    var modeIndex = validatedIndex(elements.mode.value, LAST_MODE_INDEX, elements.mode, "mode");
+    writeAdvancedSettings(null, modeIndex);
+  }
+
   function normalizeHostSettings(value) {
     var source = value || {
       mapIndex: elements.map.value,
@@ -731,6 +928,8 @@
       modeIndex: modeIndex,
       mapName: selectedLabel(elements.map, mapIndex),
       modeName: selectedLabel(elements.mode, modeIndex),
+      advanced: value ? normalizeAdvancedSettings(source.advanced, modeIndex) :
+        readAdvancedSettings(modeIndex),
     };
   }
 
@@ -742,18 +941,22 @@
       var settings = normalizeHostSettings(saved);
       elements.map.value = String(settings.mapIndex);
       elements.mode.value = String(settings.modeIndex);
+      writeAdvancedSettings(settings.advanced, settings.modeIndex);
     } catch (error) {
       /* Missing, blocked, or stale storage falls back to Battle Creek + Slayer. */
+      writeAdvancedSettings(null, 0);
     }
     syncHostPickerCards();
   }
 
   function saveHostSettings(settings) {
     try {
-      global.localStorage.setItem(HOST_SETTINGS_STORAGE_KEY, JSON.stringify({
+      var saved = {
         mapIndex: settings.mapIndex,
         modeIndex: settings.modeIndex,
-      }));
+      };
+      if (settings.advanced) saved.advanced = settings.advanced;
+      global.localStorage.setItem(HOST_SETTINGS_STORAGE_KEY, JSON.stringify(saved));
     } catch (error) {
       /* Private browsing may make local storage unavailable; hosting still works. */
     }
@@ -784,6 +987,7 @@
   }
 
   function showSetup() {
+    session.joinRequested = false;
     if (elements.dialog) elements.dialog.dataset.view = "setup";
     if (elements.wizardSteps) elements.wizardSteps.hidden = false;
     elements.setup.hidden = false;
@@ -928,8 +1132,25 @@
   }
 
   function requestConfiguredHost(settings) {
-    if (!wasmFunction("platform_web_online_host_configured")(
-      settings.mapIndex, settings.modeIndex)) {
+    var accepted;
+    if (settings.advanced) {
+      var rules = (settings.advanced.infiniteGrenades ? 1 : 0) |
+        (settings.advanced.shields ? 2 : 0) |
+        (settings.advanced.invisiblePlayers ? 4 : 0) |
+        (settings.advanced.otherPlayersOnRadar ? 8 : 0);
+      accepted = wasmFunction("platform_web_online_host_advanced_configured")(
+        settings.mapIndex,
+        settings.modeIndex,
+        settings.advanced.scoreToWin,
+        settings.advanced.respawnSeconds,
+        settings.advanced.lives,
+        settings.advanced.healthPercent,
+        rules);
+    } else {
+      accepted = wasmFunction("platform_web_online_host_configured")(
+        settings.mapIndex, settings.modeIndex);
+    }
+    if (!accepted) {
       throw new Error("Halo could not accept those host settings.");
     }
   }
@@ -1506,8 +1727,10 @@
       updateLocalRoster();
       session.inviteCode = result.invite && result.invite.code;
       if (!session.inviteCode) throw new Error("The room did not return an invite.");
-      session.inviteUrl = result.invite && result.invite.url ?
-        result.invite.url : makeInviteUrl(session.inviteCode);
+      /* Keep the visible host and path that the player opened. This lets the
+         same signaling service support a staged origin without leaking its
+         canonical production URL into preview invites. */
+      session.inviteUrl = makeInviteUrl(session.inviteCode);
       showInvite();
       session.iceServers = Array.isArray(result.iceServers) ? result.iceServers : [];
       configureTransport(session.iceServers);
@@ -1682,6 +1905,7 @@
     session.hostSettings = null;
     session.guestWasJoined = false;
     session.pendingInvite = null;
+    session.joinRequested = false;
     session.wizardStep = "map";
     syncTelemetryContext();
     renderRoster();
@@ -1790,7 +2014,16 @@
       elements.playerSidebar.addEventListener(type, containDialogKeyboardEvent);
     });
     attachPickerEvents(elements.mapOptions, "halo-map-choice", elements.map);
-    attachPickerEvents(elements.modeOptions, "halo-mode-choice", elements.mode);
+    attachPickerEvents(
+      elements.modeOptions,
+      "halo-mode-choice",
+      elements.mode,
+      resetAdvancedDefaultsForMode);
+    if (elements.advancedEnabled) {
+      elements.advancedEnabled.addEventListener("change", function() {
+        syncAdvancedSettingsState(false);
+      });
+    }
     elements.button.addEventListener("click", function() {
       if (session.active && session.role === "host" && session.hostWasReady) {
         showInvite();
@@ -1802,9 +2035,13 @@
       else if (!session.active) showSetup();
       else showProgress();
     });
-    elements.close.addEventListener("click", function() { elements.dialog.close(); });
+    elements.close.addEventListener("click", function() {
+      session.joinRequested = false;
+      elements.dialog.close();
+    });
     elements.dialog.addEventListener("cancel", function(event) {
       event.preventDefault();
+      session.joinRequested = false;
       elements.dialog.close();
     });
     elements.hostForm.addEventListener("submit", function(event) {
@@ -1854,22 +2091,7 @@
     });
     if (elements.joinProfile) {
       elements.joinProfile.addEventListener("click", function() {
-        var invite = session.pendingInvite;
-        if (!invite) {
-          setStatus("That invite is no longer available.", "error");
-          return;
-        }
-        try {
-          readPlayerProfile();
-        } catch (error) {
-          setStatus(error.message, "error");
-          return;
-        }
-        try {
-          join(invite, consumeTurnstile("join_room")).catch(fail);
-        } catch (error) {
-          setStatus(error.message, "error");
-        }
+        requestJoinFromProfile();
       });
     }
     if (elements.verificationRetry) {
@@ -1917,6 +2139,7 @@
     attachEvents();
     renderRoster();
     setBusy(false);
+    startPresencePolling();
     session.pendingInvite = takeInviteFromLocation();
     if (session.pendingInvite) {
       showDialog();
@@ -1936,6 +2159,7 @@
       }
       if (session.pendingInvite) {
         showJoinConfirmation(session.pendingInvite);
+        maybeStartRequestedJoin();
       }
     },
     host: host,
