@@ -130,6 +130,7 @@
     hostWasReady: false,
     hostSettings: null,
     campaign: null,
+    mission: null,
     guestWasJoined: false,
     leavePromise: null,
     joinRequested: false,
@@ -1033,6 +1034,170 @@
       setStatus(campaignSettingsLabel() +
         " — the room is open and the episode binds when Halo loads it.");
     }
+  }
+
+  /* Hazard Run mission authoring (Usher 61465; canonical record Finn
+     acc0ed7; bridge contract Finn 61479): the browser edits mission and
+     encounter fields against the canonical bounds and stages them through
+     the platform_web_campaign_mission_* exports. The C side owns the
+     record, the validator, and the store; the game-thread drain saves, so
+     commit only requests — the recorded header polled below is the only
+     saved proof. No JSON crosses the boundary (no second parser), and the
+     name setter carries no content policy: codes only need to fit the
+     char slot. */
+  var CAMPAIGN_MISSION_VERSION = 1;
+  var CAMPAIGN_MISSION_MAX_ENCOUNTERS = 8;
+  var CAMPAIGN_MISSION_MAX_ACTORS_PER_ENCOUNTER = 16;
+  var CAMPAIGN_MISSION_NAME_CHARACTERS = 32;
+  var CAMPAIGN_MISSION_NO_ANCHOR = -1;
+  /* Exactly campaign_mission_actor_hostile: covenant boarders and swarm
+     forms. Every other actor type is refused before the bridge. */
+  var CAMPAIGN_MISSION_HOSTILE_ACTORS = [0, 1, 2, 3, 9, 10, 11];
+
+  function normalizeMissionEncounter(entry) {
+    var source = entry || {};
+    var volume = Number(source.triggerVolumeIndex);
+    if (!Number.isInteger(volume) || volume < 0) {
+      throw new Error("Mission encounter trigger volume must be a non-negative index.");
+    }
+    var actor = Number(source.actorType);
+    if (!Number.isInteger(actor) || CAMPAIGN_MISSION_HOSTILE_ACTORS.indexOf(actor) < 0) {
+      throw new Error("Mission encounter actor must be a Hazard Run hostile.");
+    }
+    var count = integerSetting(source.actorCount, 1,
+      CAMPAIGN_MISSION_MAX_ACTORS_PER_ENCOUNTER, "Mission encounter actor count");
+    var anchor = source.anchorIndex === undefined ?
+      CAMPAIGN_MISSION_NO_ANCHOR : Number(source.anchorIndex);
+    if (!Number.isInteger(anchor) || anchor < CAMPAIGN_MISSION_NO_ANCHOR) {
+      throw new Error("Mission encounter anchor must be -1 or a non-negative index.");
+    }
+    return {
+      triggerVolumeIndex: volume,
+      actorType: actor,
+      actorCount: count,
+      anchorIndex: anchor,
+    };
+  }
+
+  function normalizeMission(value) {
+    var source = value || {};
+    var episodeIndex = integerSetting(source.episodeIndex, 0,
+      CAMPAIGN_MAX_EPISODE_INDEX, "Mission episode");
+    var name = String(source.name === undefined ? "" : source.name);
+    if (name.length < 1 || name.length > CAMPAIGN_MISSION_NAME_CHARACTERS - 1) {
+      throw new Error("Mission name must be 1–31 characters.");
+    }
+    for (var i = 0; i < name.length; i++) {
+      if (name.charCodeAt(i) > 255) {
+        throw new Error("Mission name characters must fit in a single byte.");
+      }
+    }
+    var encounters = source.encounters;
+    if (!Array.isArray(encounters) || encounters.length < 1 ||
+        encounters.length > CAMPAIGN_MISSION_MAX_ENCOUNTERS) {
+      throw new Error("Mission encounters must list 1–8 encounters.");
+    }
+    return {
+      version: CAMPAIGN_MISSION_VERSION,
+      episodeIndex: episodeIndex,
+      name: name,
+      encounters: encounters.map(normalizeMissionEncounter),
+    };
+  }
+
+  function missionEditorLabel(mission) {
+    return mission.name + " · Episode " + (mission.episodeIndex + 1) + " · " +
+      mission.encounters.length +
+      (mission.encounters.length === 1 ? " encounter" : " encounters");
+  }
+
+  function requestMissionSave(mission) {
+    if (!wasmFunction("platform_web_campaign_mission_begin")(mission.episodeIndex)) {
+      throw new Error("Halo could not stage that mission episode.");
+    }
+    for (var i = 0; i < mission.name.length; i++) {
+      if (!wasmFunction("platform_web_campaign_mission_set_name_char")(i, mission.name.charCodeAt(i))) {
+        throw new Error("Halo could not stage that mission name.");
+      }
+    }
+    mission.encounters.forEach(function(encounter) {
+      if (!wasmFunction("platform_web_campaign_mission_add_encounter")(
+          encounter.triggerVolumeIndex, encounter.actorType,
+          encounter.actorCount, encounter.anchorIndex)) {
+        throw new Error("Halo could not stage that mission encounter.");
+      }
+    });
+    if (!wasmFunction("platform_web_campaign_mission_commit")()) {
+      throw new Error("Halo had no staged mission to save.");
+    }
+  }
+
+  function missionSave(value) {
+    if (!session.runtimeReady) throw new Error("Halo is still starting.");
+    var mission = normalizeMission(value);
+    requestMissionSave(mission);
+    /* Commit only requests: the game-thread drain saves, and the recorded
+       header polled below is the only saved proof. Remember the pending
+       submission so the poll can match it. */
+    session.mission = {
+      name: mission.name,
+      episodeIndex: mission.episodeIndex,
+      encounterCount: mission.encounters.length,
+    };
+    setHeader("Mission sent to Halo", "waiting");
+    setStatus(missionEditorLabel(mission) + " — Halo is saving it…");
+    return mission;
+  }
+
+  function missionRefusalText(status) {
+    switch (status) {
+      case 1: return "Halo refused the mission episode.";
+      case 2: return "Halo refused the mission name.";
+      case 3: return "Halo refused a mission encounter.";
+      case 4: return "Halo found no staged mission to save.";
+      case 5: return "Halo validated the mission but the store refused the write.";
+      default: return "Halo refused the mission.";
+    }
+  }
+
+  function pollMissionAuthor() {
+    var pending = session.mission;
+    if (!pending) {
+      setStatus("No mission save is pending.");
+      return { saved: false, pending: false };
+    }
+    var recorded = wasmFunction("platform_web_campaign_mission_recorded")();
+    if (recorded === ((pending.episodeIndex << 8) | pending.encounterCount)) {
+      session.mission = null;
+      setHeader("Mission saved", "connected");
+      setStatus(pending.name + " · Episode " + (pending.episodeIndex + 1) + " · " +
+        pending.encounterCount +
+        (pending.encounterCount === 1 ? " encounter" : " encounters") +
+        " saved in Halo.");
+      return {
+        saved: true,
+        episodeIndex: pending.episodeIndex,
+        encounterCount: pending.encounterCount,
+      };
+    }
+    var status = wasmFunction("platform_web_campaign_mission_status")();
+    if (status !== 0) {
+      /* The drain reported a refusal: abandon the staged draft (the next
+         begin resets it anyway) and report the disposition, never a claim. */
+      wasmFunction("platform_web_campaign_mission_reset")();
+      session.mission = null;
+      setHeader("Mission refused", "offline");
+      setStatus(missionRefusalText(status));
+      return { saved: false, pending: false, status: status };
+    }
+    setHeader("Mission sent to Halo", "waiting");
+    setStatus(pending.name + " — Halo hasn't confirmed the save yet.");
+    return { saved: false, pending: true };
+  }
+
+  function missionSaveStatus() {
+    if (!session.runtimeReady) throw new Error("Halo is still starting.");
+    return pollMissionAuthor();
   }
 
   function connectedFriendsLabel(count) {
@@ -2314,6 +2479,8 @@
     },
     host: host,
     campaignHost: campaignHost,
+    missionSave: missionSave,
+    missionSaveStatus: missionSaveStatus,
     join: join,
     leave: function() { return leave(true); },
   });
