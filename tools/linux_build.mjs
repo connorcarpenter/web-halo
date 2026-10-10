@@ -135,7 +135,7 @@ export function generate(options, args = []) {
     if (fs.existsSync(authorControl)) {
       const authorObject = 'build/linux/obj/port/web/tests/campaign_mission_author_test.o';
       n.build(authorObject, 'linux_cc', [authorControl], [prefix, semantics, ...sdk], { cflags: flags([...campaignFlags, ...lto]) });
-      n.build('build/linux/campaign_mission_author_controls', 'native_control_link', [authorObject, 'build/linux/obj/source/cseries/cseries.o'], [], {
+      n.build('build/linux/campaign_mission_author_controls', 'native_control_link', [authorObject, 'build/linux/obj/source/cseries/cseries.o', 'build/linux/obj/source/cseries/cseries_windows.o', 'build/linux/obj/source/cseries/stack_walk_windows.o'], [], {
         ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, ...(lto.length ? [options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld'] : [])]),
       });
       n.build('campaign-author-controls', 'native_control_run', ['build/linux/campaign_mission_author_controls']);
