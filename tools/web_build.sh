@@ -48,7 +48,9 @@ edge build.ninja configure_web "${regen_inputs[@]}"
 printf 'rule web_sdl\n  command = bash tools/web_sdl.sh --sdk %s\n  description = WEB SDL 3.4.16\n' "$(literal "$(sq "$emsdk")")"
 edge build/web/sdl-install/lib/libSDL3.a web_sdl tools/web_sdl.sh build/native-deps/SDL-release-3.4.16/CMakeLists.txt build/native-deps/SDL-release-3.4.16/include/SDL3/SDL_version.h
 diax_archive=build/diax-guest/wasm32-unknown-emscripten/release/libhalo_diax_guest.a
-printf 'rule web_diax_guest\n  command = bash tools/diax_guest_build.sh --sdk %s\n  description = WEB DIAX GUEST\n  depfile = build/diax-guest/wasm32-unknown-emscripten/release/libhalo_diax_guest.d\n' "$(literal "$(sq "$emsdk")")"
+# Cargo can leave the archive unchanged (for example after a cfg(test)-only
+# edit). Record that outcome so Ninja does not rerun/relink it indefinitely.
+printf 'rule web_diax_guest\n  command = bash tools/diax_guest_build.sh --sdk %s\n  description = WEB DIAX GUEST\n  depfile = build/diax-guest/wasm32-unknown-emscripten/release/libhalo_diax_guest.d\n  restat = 1\n' "$(literal "$(sq "$emsdk")")"
 mapfile -d '' -t diax_sources < <(find port/web/diax_guest/src -type f -name '*.rs' -print0 | sort -z)
 edge "$diax_archive" web_diax_guest tools/diax_guest_build.sh port/web/diax_guest/Cargo.toml port/web/diax_guest/Cargo.lock port/web/diax_guest/diax-main.pin port/web/diax_guest/rust-toolchain.pin "${diax_sources[@]}"
 printf '%s\n' 'rule web_msvc_semantics' '  command = node tools/linux_msvc_semantics.mjs --output $out $scan' '  description = WEB MSVC SEMANTICS $out' '  restat = 1'
