@@ -481,3 +481,65 @@ function expectedCalls(mission) {
 
   console.log('online_client mission editor roundtrip tests passed');
 })();
+
+(function () {
+  /* Hazard Run saved-receipt binding (Finn 61813): the terminal saved
+     receipt is retained for the future activated-episode readback, which
+     compares against exactly this shape. A new save request supersedes
+     it; a refusal leaves the last proven receipt standing. */
+  missionCalls.length = 0;
+  missionStatus = 0;
+  missionRecorded = -1;
+  authorPollTimers.length = 0;
+
+  /* Receipts cross the vm-context boundary, so compare field-wise:
+     deepEqual sees two realms' prototypes, not the values. */
+  function receiptEqual(actual, expected) {
+    if (expected === null) return actual === null;
+    return !!actual && actual.name === expected.name &&
+      actual.episodeIndex === expected.episodeIndex &&
+      actual.encounterCount === expected.encounterCount;
+  }
+
+  /* Earlier blocks share this session, so the entry receipt is whatever
+     they last proved: null or a well-shaped receipt, never undefined. */
+  const entry = context.HaloOnline.missionLastSaved();
+  assert.ok(entry === null || receiptEqual(entry, {
+    name: entry.name,
+    episodeIndex: entry.episodeIndex,
+    encounterCount: entry.encounterCount,
+  }));
+
+  context.HaloOnline.missionSave(validMission());
+  assert.ok(receiptEqual(context.HaloOnline.missionLastSaved(), entry),
+    'a requested save must not move the retained receipt');
+  missionRecorded = (1 << 8) | 2;
+  while (authorPollTimers.length) authorPollTimers.shift()();
+  assert.ok(receiptEqual(context.HaloOnline.missionLastSaved(), {
+    name: 'Deck Breach',
+    episodeIndex: 1,
+    encounterCount: 2,
+  }));
+
+  /* A refused save keeps the last proven receipt: nothing was written. A
+     new request does not supersede it either; only a terminal save does. */
+  const proven = context.HaloOnline.missionLastSaved();
+  context.HaloOnline.missionSave(validMission());
+  assert.ok(receiptEqual(context.HaloOnline.missionLastSaved(), proven),
+    'a new request must not supersede the last proven receipt');
+  missionStatus = 3;
+  while (authorPollTimers.length) authorPollTimers.shift()();
+  missionStatus = 0;
+  context.HaloOnline.missionSave(validMission());
+  missionRecorded = (1 << 8) | 2;
+  while (authorPollTimers.length) authorPollTimers.shift()();
+  const first = context.HaloOnline.missionLastSaved();
+  context.HaloOnline.missionSave(validMission());
+  missionStatus = 5;
+  while (authorPollTimers.length) authorPollTimers.shift()();
+  missionStatus = 0;
+  assert.ok(receiptEqual(context.HaloOnline.missionLastSaved(), first),
+    'a refused save must not move the retained receipt');
+
+  console.log('online_client mission saved-receipt tests passed');
+})();

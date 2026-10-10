@@ -1175,6 +1175,14 @@
     }
     var recorded = wasmFunction("platform_web_campaign_mission_recorded")();
     if (recorded === ((pending.episodeIndex << 8) | pending.encounterCount)) {
+      /* Retain the proven receipt for the future activated-episode
+         readback (Finn 61813): it compares against exactly this shape.
+         A refusal never moves it; only a terminal save or a new request. */
+      session.lastSavedMission = {
+        name: pending.name,
+        episodeIndex: pending.episodeIndex,
+        encounterCount: pending.encounterCount,
+      };
       session.mission = null;
       setHeader("Mission saved", "connected");
       setStatus(pending.name + " · Episode " + (pending.episodeIndex + 1) + " · " +
@@ -1209,6 +1217,11 @@
     if (!session.runtimeReady) throw new Error("Halo is still starting.");
     if (session.mission) session.mission.reported = false;
     return pollMissionAuthor();
+  }
+
+  function missionLastSaved() {
+    if (!session.runtimeReady) throw new Error("Halo is still starting.");
+    return session.lastSavedMission || null;
   }
 
   /* Hazard Run editor roundtrip (Usher 61730): the drain confirms on the
@@ -2659,6 +2672,7 @@
     campaignHost: campaignHost,
     missionSave: missionSave,
     missionSaveStatus: missionSaveStatus,
+    missionLastSaved: missionLastSaved,
     join: join,
     leave: function() { return leave(true); },
   });
