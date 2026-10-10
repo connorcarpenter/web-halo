@@ -15,6 +15,7 @@
  */
 
 #include "cseries.h"
+#include <stdbool.h>
 #include "game/campaign_coop.h"
 #include "game/players.h"
 #include "main/main.h"
@@ -24,9 +25,9 @@
  * campaign_coop_session_commit(). Zero seats means unformed: the accessors
  * below fall back to player_spawn_count. */
 static struct campaign_coop_session campaign_coop_committed_session;
-static boolean campaign_coop_session_committed = FALSE;
+static bool campaign_coop_session_committed = false;
 
-boolean campaign_coop_session_form(
+bool campaign_coop_session_form(
 	struct campaign_coop_session *session,
 	int16_t episode_index)
 {
@@ -66,7 +67,7 @@ void campaign_coop_session_commit(
 		return;
 
 	campaign_coop_committed_session = *session;
-	campaign_coop_session_committed = TRUE;
+	campaign_coop_session_committed = true;
 
 	return;
 }
