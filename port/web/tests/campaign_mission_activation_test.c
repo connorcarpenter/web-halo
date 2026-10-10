@@ -271,7 +271,7 @@ int main(void)
 		CAMPAIGN_MISSION_NO_ANCHOR) == CAMPAIGN_MISSION_AUTHOR_SAVED);
 	memset(&report, 0, sizeof(report));
 	bound = -1;
-	CHECK(campaign_mission_activate_bound(3, &report) == CAMPAIGN_MISSION_APPLY_OK);
+	CHECK(campaign_mission_activate_bound(3, &report, &bound) == CAMPAIGN_MISSION_APPLY_OK);
 	CHECK(bound == 0);
 	activated = campaign_mission_activated();
 	CHECK(activated != NULL);
@@ -286,7 +286,7 @@ int main(void)
 		2) == CAMPAIGN_MISSION_AUTHOR_SAVED);
 	memset(&report, 0, sizeof(report));
 	bound = -1;
-	CHECK(campaign_mission_activate_bound(4, &report) == CAMPAIGN_MISSION_APPLY_OK);
+	CHECK(campaign_mission_activate_bound(4, &report, &bound) == CAMPAIGN_MISSION_APPLY_OK);
 	CHECK(report.pending_count == 1);
 	CHECK(bound == 1);
 	activated = campaign_mission_activated();
@@ -303,7 +303,7 @@ int main(void)
 		7) == CAMPAIGN_MISSION_AUTHOR_SAVED);
 	memset(&report, 0, sizeof(report));
 	bound = -1;
-	CHECK(campaign_mission_activate_bound(5, &report) ==
+	CHECK(campaign_mission_activate_bound(5, &report, &bound) ==
 		CAMPAIGN_MISSION_APPLY_REFUSED);
 	CHECK(bound == 0);
 	activated = campaign_mission_activated();
