@@ -27,7 +27,10 @@ the SDK's older SDL port. Historical files remain preserved, not executable hook
 The SDK must be installed outside the project and agent home. Signed policy
 permits unchanged upstream compiler internals through documented shell entries;
 direct Python invocations, vendor patches and project Python hooks remain barred.
-Emscripten 6.0.12 is the candidate pin, not yet installed or browser-qualified.
+Emscripten 6.0.12 is installed externally via unchanged emsdk install/activate.
+Compiler readback is 6.0.12 (5488e0871d46d19a3209988190fa6a653126256f);
+SDK manager source is 35ff8a6d150541276abbc6bae512ca90bcfbe220. Installation
+and version readback are not browser C qualification.
 
 The historical launcher `tools/web_run.py`, ISO extraction and development
 server still require migration. Do not execute those Python paths under the

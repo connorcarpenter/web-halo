@@ -10,7 +10,7 @@ while (($#)); do
     --web-cc|--compiler-launcher) (($# >= 2)) || { echo "Missing value: $1" >&2; exit 2; }; if [[ $1 == --web-cc ]]; then web_cc=$2; else launcher=$2; fi; shift 2 ;;
     --release) release=true; shift ;;
     --sdk) (($# >= 2)) || { echo 'Missing --sdk path' >&2; exit 2; }; emsdk=$2; shift 2 ;;
-    --help|-h) echo 'Usage: bash tools/web_build.sh [--web-cc BINARY] [--compiler-launcher BINARY] [--release]'; exit 0 ;;
+    --help|-h) echo 'Usage: bash tools/web_build.sh --sdk DIRECTORY [--web-cc BINARY] [--compiler-launcher BINARY] [--release]'; exit 0 ;;
     *) echo "Unsupported web argument: $1" >&2; exit 2 ;;
   esac
 done
