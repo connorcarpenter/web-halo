@@ -12,6 +12,7 @@ crate-type = ["staticlib"]
 [dependencies]
 modding_runtime = { path = "../../../../diax/crates/modding/runtime" }
 modding_abi = { path = "../../../../diax/crates/modding/abi" }
+sha2 = "0.10"
 
 [dev-dependencies]
 wat = "1"

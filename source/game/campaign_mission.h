@@ -132,6 +132,15 @@ static inline bool campaign_mission_valid(
 		if (entry->anchor_index < CAMPAIGN_MISSION_NO_ANCHOR)
 			return false;
 	}
+	/* A serialized zero-hostile/work-only record cannot hide stale hostile
+	 * rows beyond its count. Authoring always zeroes these unused rows. */
+	for (; encounter < CAMPAIGN_MISSION_MAX_ENCOUNTERS; encounter++)
+	{
+		const struct campaign_mission_encounter *entry = &mission->encounters[encounter];
+		if (entry->trigger_volume_index || entry->actor_type ||
+			entry->actor_count || entry->anchor_index)
+			return false;
+	}
 
 	return true;
 }
@@ -145,7 +154,7 @@ enum campaign_mission_author_disposition
 	CAMPAIGN_MISSION_AUTHOR_BAD_EPISODE = 1,
 	CAMPAIGN_MISSION_AUTHOR_BAD_NAME = 2,
 	CAMPAIGN_MISSION_AUTHOR_BAD_ENCOUNTER = 3,
-	CAMPAIGN_MISSION_AUTHOR_EMPTY_DRAFT = 4,
+	/* Reserved former empty-draft code; zero encounters is valid. */
 	CAMPAIGN_MISSION_AUTHOR_STORE_REFUSED = 5,
 };
 

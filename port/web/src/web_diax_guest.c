@@ -19,16 +19,18 @@ static int guest_event(void *context, const uint8_t *input, int32_t len,
         output, (uint32_t)capacity);
 }
 
-static int guest_capture(void *context, uint8_t *output, int32_t capacity)
+static int guest_capture(void *context, uint8_t *output, int32_t capacity,
+    int32_t generation, uint32_t serial)
 {
     if (capacity < 0) return -1;
-    return halo_diax_capture(context, output, (uint32_t)capacity);
+    return halo_diax_capture(context, output, (uint32_t)capacity, generation, serial);
 }
 
-static int guest_restore(void *context, const uint8_t *input, int32_t len)
+static int guest_restore(void *context, const uint8_t *input, int32_t len,
+    int32_t generation, uint32_t serial)
 {
     if (len < 0) return -1;
-    return halo_diax_restore(context, input, (uint32_t)len);
+    return halo_diax_restore(context, input, (uint32_t)len, generation, serial);
 }
 
 int web_diax_guest_make_slots(struct halo_diax_guest *guest,
@@ -147,6 +149,9 @@ int web_diax_worker_close(struct web_diax_worker *worker)
     struct web_diax_worker empty = WEB_DIAX_WORKER_INITIALIZER;
     if (!worker_on_owner(worker)) return CAMPAIGN_COOP_ADAPTER_REFUSED;
     prior = worker->guest;
+    /* Closing a guest does not release this worker's pthread ownership. */
+    empty.owner = worker->owner;
+    empty.owner_set = worker->owner_set;
     *worker = empty;
     halo_diax_destroy(prior);
     return CAMPAIGN_COOP_ADAPTER_OK;

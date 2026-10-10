@@ -12,7 +12,10 @@
 int web_diax_guest_make_slots(struct halo_diax_guest *guest,
     struct campaign_coop_adapter_slots *slots);
 
-/* Initialize once before use; never copy a live worker. Bind, byte delivery,
+/* Initialize once before use; never copy a live worker. Before the first
+ * successful bind, setup and all calls must be exclusive on one pthread (no
+ * concurrent first-bind attempt). Publish to observers only after binding.
+ * Bind, byte delivery,
  * capture, restore and close all run on the pthread that first binds it.
  * These functions own the real guest; the host still owns admission metadata,
  * decoding/validating/applying actions and coherent engine checkpoints.
@@ -51,6 +54,7 @@ int web_diax_worker_capture_guest(struct web_diax_worker *worker,
 int web_diax_worker_restore_guest(struct web_diax_worker *worker,
     int32_t generation, uint32_t first_serial, int64_t guest_blob_id,
     const uint8_t *image, int32_t image_len);
-/* Idempotent on the owner; a foreign pthread refuses without freeing state. */
+/* Idempotent on the owner; a foreign pthread refuses without freeing state.
+ * Retains ownership across close and rebind; never resets it for transfer. */
 int web_diax_worker_close(struct web_diax_worker *worker);
 #endif

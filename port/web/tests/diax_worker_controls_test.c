@@ -15,11 +15,11 @@ static int checks;
     } \
 } while (0)
 
-enum { CONTROL_KIND = 123, CONTROL_BLOB_ID = 11, PAGE_BYTES = 65536 };
+enum { CONTROL_KIND = 123, CONTROL_BLOB_ID = 11, PAGE_BYTES = 65536, HEADER_BYTES = 84 };
 static uint8_t event_byte;
 static uint8_t actions[4096];
-static uint8_t image[PAGE_BYTES];
-static uint8_t restored_image[PAGE_BYTES];
+static uint8_t image[PAGE_BYTES + HEADER_BYTES];
+static uint8_t restored_image[PAGE_BYTES + HEADER_BYTES];
 static uint8_t error[256];
 struct foreign_checks
 {
@@ -71,7 +71,7 @@ int main(void)
     CHECK(worker.initial_actions_pending && worker.adapter.initial_action_len == 1);
     CHECK(dispatch(&worker, 1, 100, &len) == -1);
     CHECK(web_diax_worker_capture_guest(&worker, image, sizeof(image), &len) == -1);
-    CHECK(web_diax_worker_restore_guest(&worker, 2, 200, CONTROL_BLOB_ID,
+    CHECK(web_diax_worker_restore_guest(&worker, 2, 100, CONTROL_BLOB_ID,
         image, sizeof(image)) == -1);
     CHECK(bind(&worker, 2) == -1);
     CHECK(web_diax_worker_take_initial_actions(&worker, NULL, 0, &len) == -1);
@@ -80,7 +80,7 @@ int main(void)
     CHECK(len == 1 && actions[0] == 10 && !worker.initial_actions_pending);
     CHECK(web_diax_worker_take_initial_actions(&worker, actions, sizeof(actions), &len) == -1);
     CHECK(web_diax_worker_capture_guest(&worker, image, sizeof(image), &len) == 0);
-    CHECK(len == PAGE_BYTES && image[4] == 1);
+    CHECK(len == sizeof(image) && image[HEADER_BYTES + 4] == 1);
     CHECK(dispatch(&worker, 2, 100, &len) == -1);
     CHECK(dispatch(&worker, 1, 101, &len) == -1);
     CHECK(dispatch(&worker, 1, 100, &len) == 0 && len == 1 && actions[0] == 11);
@@ -104,27 +104,33 @@ int main(void)
     CHECK(worker.guest == prior && worker.adapter.bound_generation == 1);
     CHECK(bind(&worker, 1) == -1);
     CHECK(dispatch(&worker, 1, 102, &len) == 0 && actions[0] == 13);
-    CHECK(web_diax_worker_restore_guest(&worker, 2, 200, CONTROL_BLOB_ID,
+    CHECK(web_diax_worker_restore_guest(&worker, 2, 100, CONTROL_BLOB_ID,
         image, sizeof(image) - 1) == -1);
     CHECK(worker.adapter.bound_generation == 1);
-    CHECK(web_diax_worker_restore_guest(&worker, 2, 200, CONTROL_BLOB_ID + 1,
+    CHECK(web_diax_worker_restore_guest(&worker, 2, 99, CONTROL_BLOB_ID,
         image, sizeof(image)) == -1);
-    CHECK(web_diax_worker_restore_guest(&worker, 2, 200, CONTROL_BLOB_ID,
+    image[HEADER_BYTES] ^= 1;
+    CHECK(web_diax_worker_restore_guest(&worker, 2, 100, CONTROL_BLOB_ID,
+        image, sizeof(image)) == -1);
+    image[HEADER_BYTES] ^= 1;
+    CHECK(web_diax_worker_restore_guest(&worker, 2, 100, CONTROL_BLOB_ID + 1,
+        image, sizeof(image)) == -1);
+    CHECK(web_diax_worker_restore_guest(&worker, 2, 100, CONTROL_BLOB_ID,
         image, sizeof(image)) == 0);
     CHECK(web_diax_worker_capture_guest(&worker, restored_image, sizeof(restored_image), &len) == 0);
-    CHECK(restored_image[4] == 1); /* Restore did not run __init a second time. */
+    CHECK(restored_image[HEADER_BYTES + 4] == 1); /* Restore did not run __init a second time. */
     CHECK(dispatch(&worker, 1, 103, &len) == -1);
-    CHECK(dispatch(&worker, 2, 200, &len) == 0 && actions[0] == 11);
+    CHECK(dispatch(&worker, 2, 100, &len) == 0 && actions[0] == 11);
 
     event_byte = 255;
-    CHECK(dispatch(&worker, 2, 201, &len) == -1);
+    CHECK(dispatch(&worker, 2, 101, &len) == -1);
     event_byte = 0;
-    CHECK(dispatch(&worker, 2, 201, &len) == -1);
-    CHECK(worker.adapter.next_serial == 201);
+    CHECK(dispatch(&worker, 2, 101, &len) == -1);
+    CHECK(worker.adapter.next_serial == 101);
     CHECK(web_diax_worker_capture_guest(&worker, image, sizeof(image), &len) == -1);
-    CHECK(web_diax_worker_restore_guest(&worker, 3, 300, CONTROL_BLOB_ID,
-        image, sizeof(image)) == 0);
-    CHECK(dispatch(&worker, 3, 300, &len) == 0 && actions[0] == 11);
+    CHECK(web_diax_worker_restore_guest(&worker, 3, 100, CONTROL_BLOB_ID,
+        restored_image, sizeof(restored_image)) == 0);
+    CHECK(dispatch(&worker, 3, 100, &len) == 0 && actions[0] == 11);
 
     prior = worker.guest;
     CHECK(bind(&worker, 4) == 0 && worker.guest != prior);
@@ -137,8 +143,15 @@ int main(void)
     CHECK(web_diax_worker_take_initial_actions(&worker, NULL, 0, &len) == 0 && len == 0);
     CHECK(dispatch(&worker, 5, 100, &len) == 0 && actions[0] == 11);
     CHECK(web_diax_worker_capture_guest(&worker, image, sizeof(image), &len) == 0);
-    CHECK(image[4] == 1);
+    CHECK(image[HEADER_BYTES + 4] == 1);
     CHECK(web_diax_worker_close(&worker) == 0 && !worker.guest);
+    CHECK(worker.owner_set);
+    CHECK(pthread_create(&foreign, NULL, foreign_thread, &foreign_result) == 0);
+    CHECK(pthread_join(foreign, NULL) == 0);
+    CHECK(foreign_result.close_status == -1);
+    CHECK(bind(&worker, 6) == 0);
+    CHECK(web_diax_worker_take_initial_actions(&worker, actions, sizeof(actions), &len) == 0);
+    CHECK(web_diax_worker_close(&worker) == 0);
     CHECK(web_diax_worker_close(&worker) == 0);
     CHECK(dispatch(&worker, 5, 101, &len) == -1);
     printf("Diax worker controls: %d checks passed (real native C/Rust/wasmi)\n", checks);

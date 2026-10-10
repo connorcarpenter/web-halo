@@ -26,12 +26,17 @@ int32_t halo_diax_take_output(struct halo_diax_guest *guest,
 int32_t halo_diax_event(struct halo_diax_guest *guest,
     const uint8_t *input, uint32_t len, uint8_t *actions, uint32_t capacity);
 int32_t halo_diax_capture(struct halo_diax_guest *guest,
-    uint8_t *image, uint32_t capacity);
-/* Fresh instance from stored SAME blob, memory restored without __init.
- * Invalid images leave the current guest intact. Whole Wasm pages, not records. */
+    uint8_t *image, uint32_t capacity, int32_t generation, uint32_t next_serial);
+/* Versioned SHA256 envelope: actual blob digest, captured generation/serial,
+ * whole-page memory length and integrity digest. Max 64 MiB + 84 bytes.
+ * Fresh instance from stored same blob; no __init. Invalid envelopes preserve
+ * live state. Integrity is a corruption check, not authentication of publishers.
+ * expected metadata comes from the host's selected committed checkpoint. */
 int32_t halo_diax_restore(struct halo_diax_guest *guest,
-    const uint8_t *image, uint32_t len);
-/* Copies the last refusal as NUL-terminated UTF-8; capacity must include NUL. */
+    const uint8_t *image, uint32_t len, int32_t expected_generation,
+    uint32_t expected_next_serial);
+/* Copies/truncates the last refusal as NUL-terminated UTF-8, including on short
+ * buffers. Returns copied length, or -1 for invalid/zero-capacity buffer. */
 int32_t halo_diax_error(const struct halo_diax_guest *guest,
     uint8_t *error, uint32_t capacity);
 #endif

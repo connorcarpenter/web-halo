@@ -190,8 +190,9 @@ static int stub_adapter_handle(
 static int stub_adapter_capture(
 	void *context,
 	uint8_t *image_out,
-	int32_t image_capacity)
+	int32_t image_capacity, int32_t generation, uint32_t serial)
 {
+	(void)generation; (void)serial;
 	if (context != &stub_adapter_context) return -1;
 	if (image_capacity < 4)
 		return -1;
@@ -205,8 +206,9 @@ static int stub_adapter_capture(
 static int stub_adapter_restore(
 	void *context,
 	const uint8_t *image_in,
-	int32_t image_len)
+	int32_t image_len, int32_t generation, uint32_t serial)
 {
+	(void)generation; (void)serial;
 	if (context != &stub_adapter_context) return -1;
 	(void)image_in;
 	stub_adapter_restored_length = image_len;
@@ -468,7 +470,7 @@ int main(
 			CAMPAIGN_COOP_ADAPTER_REFUSED);
 		CHECK(campaign_coop_adapter_capture(&adapter, image, 32,
 			&produced) == CAMPAIGN_COOP_ADAPTER_REFUSED);
-		CHECK(campaign_coop_adapter_restore(&adapter, 1, 200, 11,
+		CHECK(campaign_coop_adapter_restore(&adapter, 1, 102, 11,
 			image, 4) == CAMPAIGN_COOP_ADAPTER_REFUSED);
 
 		/* Incomplete slots bind nothing. */
@@ -556,10 +558,10 @@ int main(
 		/* Restore refusals keep the prior binding intact. */
 		CHECK(campaign_coop_adapter_restore(&adapter, 0, 200, 11,
 			image, 4) == CAMPAIGN_COOP_ADAPTER_REFUSED);
-		CHECK(campaign_coop_adapter_restore(&adapter, 1, 200, 12,
+		CHECK(campaign_coop_adapter_restore(&adapter, 1, 102, 12,
 			image, 4) == CAMPAIGN_COOP_ADAPTER_REFUSED);
 		stub_adapter_restore_fail = 1;
-		CHECK(campaign_coop_adapter_restore(&adapter, 1, 200, 11,
+		CHECK(campaign_coop_adapter_restore(&adapter, 1, 102, 11,
 			image, 4) == CAMPAIGN_COOP_ADAPTER_REFUSED);
 		stub_adapter_restore_fail = 0;
 		CHECK(campaign_coop_adapter_dispatch(&adapter, 0, 102,
@@ -568,13 +570,13 @@ int main(
 
 		/* Good restore advances the generation, resets the fence,
 		 * and never re-runs __init; the old generation is dead. */
-		CHECK(campaign_coop_adapter_restore(&adapter, 1, 200, 11,
+		CHECK(campaign_coop_adapter_restore(&adapter, 1, 102, 11,
 			image, 4) == CAMPAIGN_COOP_ADAPTER_OK);
 		CHECK(stub_adapter_init_calls == 3);
 		CHECK(campaign_coop_adapter_dispatch(&adapter, 0, 102,
 			event_in, 8, action_out, 16, &produced) ==
 			CAMPAIGN_COOP_ADAPTER_REFUSED);
-		CHECK(campaign_coop_adapter_dispatch(&adapter, 1, 200,
+		CHECK(campaign_coop_adapter_dispatch(&adapter, 1, 102,
 			event_in, 8, action_out, 16, &produced) ==
 			CAMPAIGN_COOP_ADAPTER_OK);
 		CHECK(produced == 8);
@@ -584,14 +586,14 @@ int main(
 		 * count and invalidating the preceding generation's traffic. */
 		{
 			static uint8_t page_image[65536];
-			CHECK(campaign_coop_adapter_restore(&adapter, 2, 300, 11,
+			CHECK(campaign_coop_adapter_restore(&adapter, 2, 102, 11,
 				page_image, sizeof(page_image)) == CAMPAIGN_COOP_ADAPTER_OK);
 			CHECK(stub_adapter_restored_length == sizeof(page_image));
 			CHECK(stub_adapter_init_calls == 3);
 			CHECK(campaign_coop_adapter_dispatch(&adapter, 1, 201,
 				event_in, 8, action_out, 16, &produced) ==
 				CAMPAIGN_COOP_ADAPTER_REFUSED);
-			CHECK(campaign_coop_adapter_dispatch(&adapter, 2, 300,
+			CHECK(campaign_coop_adapter_dispatch(&adapter, 2, 102,
 				event_in, 8, action_out, 16, &produced) ==
 				CAMPAIGN_COOP_ADAPTER_OK);
 		}

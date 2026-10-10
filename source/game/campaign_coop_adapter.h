@@ -72,11 +72,13 @@ struct campaign_coop_adapter_slots
 		uint8_t *action_out, int32_t action_capacity);
 	/* Memory-image capture: returns the image byte length, or
 	 * negative on refusal. */
-	int (*guest_capture_image)(void *guest_context, uint8_t *image_out, int32_t image_capacity);
+	int (*guest_capture_image)(void *guest_context, uint8_t *image_out, int32_t image_capacity,
+		int32_t generation, uint32_t next_serial);
 	/* Memory-image restore of a fresh same-blob image: 0 on success,
 	 * nonzero otherwise. Never re-runs __init (structural: the
 	 * restore path below holds no init call). */
-	int (*guest_restore_image)(void *guest_context, const uint8_t *image_in, int32_t image_len);
+	int (*guest_restore_image)(void *guest_context, const uint8_t *image_in, int32_t image_len,
+		int32_t expected_generation, uint32_t expected_next_serial);
 };
 
 struct campaign_coop_adapter
@@ -92,6 +94,11 @@ struct campaign_coop_adapter
 	/* Gapless worker serial fence: dispatch consumes exactly this
 	 * serial, so a stale or replayed event refuses. */
 	uint32_t next_serial;
+	/* Metadata of the selected captured image. Restores cannot choose an
+	 * arbitrary serial or replay an older capture after a newer selection. */
+	int checkpoint_selected;
+	int32_t checkpoint_generation;
+	uint32_t checkpoint_serial;
 	/* Bytes from __init that the host must drain/apply; never discard them. */
 	int32_t initial_action_len;
 	struct campaign_coop_adapter_slots slots;
@@ -157,6 +164,9 @@ static inline int campaign_coop_adapter_bind(
 	staged.required_abi_version = required_abi_version;
 	staged.guest_blob_id = guest_blob_id;
 	staged.next_serial = first_serial;
+	staged.checkpoint_selected = 0;
+	staged.checkpoint_generation = CAMPAIGN_COOP_ADAPTER_NO_GENERATION;
+	staged.checkpoint_serial = 0;
 	staged.initial_action_len = produced;
 	staged.slots = *slots;
 	*adapter = staged;
@@ -185,11 +195,16 @@ static inline int campaign_coop_adapter_dispatch(
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 	if (generation != adapter->bound_generation || serial != adapter->next_serial)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
+	/* Exhaustion requires an explicit new binding/generation, never wrap. */
+	if (serial == UINT32_MAX)
+		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 	if (!event_in || event_len < 0 ||
 		event_len > CAMPAIGN_COOP_ADAPTER_MAX_PAYLOAD)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 	if (!action_out || action_capacity <= 0 || !action_len_out)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
+	if (action_capacity > CAMPAIGN_COOP_ADAPTER_MAX_PAYLOAD)
+		action_capacity = CAMPAIGN_COOP_ADAPTER_MAX_PAYLOAD;
 
 	produced = adapter->slots.guest_handle_event(adapter->slots.guest_context, event_in, event_len,
 		action_out, action_capacity);
@@ -215,16 +230,20 @@ static inline int campaign_coop_adapter_capture(
 	if (!image_out || image_capacity <= 0 || !image_len_out)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 
-	produced = adapter->slots.guest_capture_image(adapter->slots.guest_context, image_out, image_capacity);
+	produced = adapter->slots.guest_capture_image(adapter->slots.guest_context, image_out,
+		image_capacity, adapter->bound_generation, adapter->next_serial);
 	if (produced < 0 || produced > image_capacity)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 
 	*image_len_out = (int32_t)produced;
+	adapter->checkpoint_selected = 1;
+	adapter->checkpoint_generation = adapter->bound_generation;
+	adapter->checkpoint_serial = adapter->next_serial;
 	return CAMPAIGN_COOP_ADAPTER_OK;
 }
 
-/* Restores a fresh same-blob image and advances to a new live
- * generation with a fresh serial fence. The generation must advance
+/* Restores the selected same-blob envelope and advances to a new live
+ * generation with the captured serial fence. The generation must advance
  * (a same-generation restore refuses); the blob identity must match
  * the bound guest (a foreign blob refuses); a failed restore keeps the
  * prior binding intact. Post-restore dispatch continues without any
@@ -243,9 +262,12 @@ static inline int campaign_coop_adapter_restore(
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 	if (guest_blob_id != adapter->guest_blob_id)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
+	if (!adapter->checkpoint_selected || first_serial != adapter->checkpoint_serial)
+		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 	if (!image_in || image_len <= 0)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
-	if (adapter->slots.guest_restore_image(adapter->slots.guest_context, image_in, image_len) != 0)
+	if (adapter->slots.guest_restore_image(adapter->slots.guest_context, image_in,
+		image_len, adapter->checkpoint_generation, adapter->checkpoint_serial) != 0)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 
 	adapter->bound_generation = generation;
