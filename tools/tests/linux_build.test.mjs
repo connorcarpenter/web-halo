@@ -42,4 +42,8 @@ test('authored campaign units join the production and native control graph exact
   const controlEdge = output.split('\n').find(line => line.startsWith('build build/linux/campaign_coop_native_controls:'));
   for (const name of authored) assert.ok(controlEdge.includes(`build/linux/obj/source/game/${name}.o`));
   assert.ok(controlEdge.includes('build/linux/obj/port/web/tests/campaign_coop_native_controls_test.o'));
+  if (fs.existsSync('port/web/tests/campaign_mission_author_test.c')) {
+    assert.match(output, /build build\/linux\/campaign_mission_author_controls: native_control_link build\/linux\/obj\/port\/web\/tests\/campaign_mission_author_test\.o/);
+    assert.match(output, /build campaign-author-controls: native_control_run build\/linux\/campaign_mission_author_controls/);
+  }
 });

@@ -131,6 +131,15 @@ export function generate(options, args = []) {
     });
     n.rule('native_control_run', { command: '$in', description: 'RUN campaign native controls' });
     n.build('campaign-native-controls', 'native_control_run', ['build/linux/campaign_coop_native_controls']);
+    const authorControl = 'port/web/tests/campaign_mission_author_test.c';
+    if (fs.existsSync(authorControl)) {
+      const authorObject = 'build/linux/obj/port/web/tests/campaign_mission_author_test.o';
+      n.build(authorObject, 'linux_cc', [authorControl], [prefix, semantics, ...sdk], { cflags: flags([...campaignFlags, ...lto]) });
+      n.build('build/linux/campaign_mission_author_controls', 'native_control_link', [authorObject], [], {
+        ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, ...(lto.length ? [options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld'] : [])]),
+      });
+      n.build('campaign-author-controls', 'native_control_run', ['build/linux/campaign_mission_author_controls']);
+    }
   }
   n.lines.push('default linux');
   return n.toString();
