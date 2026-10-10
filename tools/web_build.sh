@@ -48,7 +48,7 @@ edge build.ninja configure_web "${regen_inputs[@]}"
 printf 'rule web_sdl\n  command = bash tools/web_sdl.sh --sdk %s\n  description = WEB SDL 3.4.16\n' "$(literal "$(sq "$emsdk")")"
 edge build/web/sdl-install/lib/libSDL3.a web_sdl tools/web_sdl.sh build/native-deps/SDL-release-3.4.16/CMakeLists.txt build/native-deps/SDL-release-3.4.16/include/SDL3/SDL_version.h
 diax_archive=build/diax-guest/wasm32-unknown-emscripten/release/libhalo_diax_guest.a
-printf 'rule web_diax_guest\n  command = bash tools/diax_guest_build.sh --sdk %s\n  description = WEB DIAX GUEST\n  depfile = build/diax-guest/wasm32-unknown-emscripten/release/libhalo_diax_guest.d\n' "$(literal "$(sq "$emsdk")")
+printf 'rule web_diax_guest\n  command = bash tools/diax_guest_build.sh --sdk %s\n  description = WEB DIAX GUEST\n  depfile = build/diax-guest/wasm32-unknown-emscripten/release/libhalo_diax_guest.d\n' "$(literal "$(sq "$emsdk")")"
 mapfile -d '' -t diax_sources < <(find port/web/diax_guest/src -type f -name '*.rs' -print0 | sort -z)
 edge "$diax_archive" web_diax_guest tools/diax_guest_build.sh port/web/diax_guest/Cargo.toml port/web/diax_guest/Cargo.lock port/web/diax_guest/diax-main.pin "${diax_sources[@]}"
 printf '%s\n' 'rule web_msvc_semantics' '  command = node tools/linux_msvc_semantics.mjs --output $out $scan' '  description = WEB MSVC SEMANTICS $out' '  restat = 1'
@@ -79,7 +79,7 @@ while IFS= read -r project; do
   while IFS= read -r define; do flags+=" $(sq "-D$define")"; done < <(jq -r '.options.defines // [] | .[]' <<<"$project")
   while IFS= read -r inc; do flags+=" -I$(sq "$inc")"; done < <(jq -r '.options.include_dirs // [] | .[] | select(. != "xbox/include")' <<<"$project")
   mapfile -t selected < <(jq -r --slurpfile port port/linux/port.json '.objects[] | select(.status != "MISSING") | .name | select(test("\\.c$";"i")) | select(. as $n | $port[0].exclude_sources | index($n) | not)' <<<"$project")
-  for authored in source/game/campaign_coop.c source/game/campaign_mission.c source/game/campaign_mission_apply.c source/main/main_fatal.c source/shell/shell_entry.c; do
+  for authored in source/game/campaign_coop.c source/game/campaign_mission.c source/game/campaign_mission_apply.c source/game/campaign_mission_associate.c source/main/main_fatal.c source/shell/shell_entry.c; do
     if [[ -f $authored && " ${selected[*]} " != *" $authored "* ]]; then selected+=("$authored"); fi
   done
   for source in "${selected[@]}"; do
