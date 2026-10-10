@@ -340,6 +340,7 @@ symbols in this file:
 #include "game.h"
 #include "game_engine.h"
 #include "game/campaign_coop.h"
+#include "game/campaign_mission.h"
 #include "game/cheats.h"
 #include "game/player_control.h"
 #include "game/player_control_runtime.h"
@@ -841,7 +842,17 @@ static void create_local_players(
 		struct campaign_coop_session formed_session;
 
 		if (campaign_coop_session_form(&formed_session, campaign_coop_host_episode()))
+		{
 			campaign_coop_session_commit(&formed_session);
+			/* Hazard Run (Vehicle A, play path): activate the authored
+			 * episode mission against the loaded scenario. The scenario
+			 * is loaded here (game_load succeeded), so real volume
+			 * semantics apply. Refusals (no record, no scenario,
+			 * out-of-range volumes, unresolved explicit anchors) leave
+			 * activation untouched; the encounter layer reads
+			 * campaign_mission_activated(). */
+			(void)campaign_mission_activate(formed_session.episode_index, NULL);
+		}
 	}
 
 	return;

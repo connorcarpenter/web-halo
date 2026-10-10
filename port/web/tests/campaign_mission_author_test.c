@@ -4,10 +4,17 @@
  * compiles the UNMODIFIED source/game/campaign_mission.c, whose engine
  * headers (cseries/cseries.h, tag_files/files.h) need the native DAG
  * header closure, as in the sibling campaign_coop_native_controls_test.c.
- * Only the backing store is stubbed at link level -- the field-keyed
- * datastore_write/datastore_read below -- so per-episode separation and
- * store-untouched-on-refusal are actually verified against the real
- * commit path, including the NULL-array refusal.
+ *
+ * TEST-ONLY backing store: the field-keyed store below lives under
+ * test-only test_datastore_write/test_datastore_read names, redirected
+ * from the production datastore_write/datastore_read calls by macro, so
+ * this unit never defines production datastore symbols and links clean
+ * beside the real tag_files/files.o. Per-episode separation and
+ * store-untouched-on-refusal are verified against the real commit path,
+ * including the NULL-array refusal. Real backing-store save/load
+ * acceptance (actual datastore initialization/file storage contract)
+ * lives in campaign_mission_datastore_test.c, which links the real
+ * files.o with isolated test data and defines no store at all.
  *
  * Native DAG shape (tooling owner wires this): one TU .o per test .c. */
 
@@ -21,6 +28,12 @@
  * unaffected. */
 #undef printf
 #undef fprintf
+
+/* Redirect the production store calls inside the included unit to the
+ * test-only names below. This TU then defines no datastore_write /
+ * datastore_read symbols and cannot collide with tag_files/files.o. */
+#define datastore_write test_datastore_write
+#define datastore_read test_datastore_read
 
 #include "game/campaign_mission.c"
 
@@ -53,7 +66,7 @@ static int stub_find_field(const char *field_name)
 	return -1;
 }
 
-boolean datastore_write(
+boolean test_datastore_write(
 	const char *file_name,
 	const char *field_name,
 	long length,
@@ -81,7 +94,7 @@ boolean datastore_write(
 	return 1;
 }
 
-boolean datastore_read(
+boolean test_datastore_read(
 	const char *file_name,
 	const char *field_name,
 	long length,

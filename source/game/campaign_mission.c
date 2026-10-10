@@ -1,19 +1,19 @@
-/* Campaign mission record save/reload (Vehicle A, Hazard Run authoring
- * slice 1). Validation lives inline in campaign_mission.h; this unit
- * only moves valid records through the datastore field. */
+/* Campaign mission record save/reload/activate (Vehicle A, Hazard Run
+ * authoring slice 1, play-path slice). Validation lives inline in
+ * campaign_mission.h; this unit only moves valid records through the
+ * datastore field and resolves them against the loaded scenario.
+ * Store names live in campaign_mission.h so every per-episode address
+ * spells the same field. */
 
 #include "cseries/cseries.h"
 #include "game/campaign_mission.h"
+#include "game/campaign_mission_apply.h"
+#include "scenario/scenario.h"
+#include "scenario/scenario_definitions.h"
 #include "tag_files/files.h"
 
 /* Datastore field holding the flat record verbatim. */
 #define CAMPAIGN_MISSION_DATASTORE_FIELD "hazard_mission"
-
-/* Engine-resolved mission store. The browser never names it: the commit
- * entry below always writes here, so authored records land in one known
- * file with one field per episode. */
-#define CAMPAIGN_MISSION_DATASTORE_FILE "hazard_missions"
-#define CAMPAIGN_MISSION_DATASTORE_FIELD_PREFIX "hazard_mission_"
 
 bool campaign_mission_save(
 	const char *file_name,
@@ -123,4 +123,94 @@ int campaign_mission_author_commit(
 		*recorded_out = ((int)episode_index << 8) | (int)encounter_count;
 
 	return CAMPAIGN_MISSION_AUTHOR_SAVED;
+}
+
+bool campaign_mission_load_episode(
+	int16_t episode_index,
+	struct campaign_mission *mission)
+{
+	struct campaign_mission loaded;
+	/* "hazard_mission_" plus one episode digit plus the terminator. */
+	char field[sizeof(CAMPAIGN_MISSION_DATASTORE_FIELD_PREFIX) + 1];
+	long prefix_length;
+
+	if (episode_index < 0 ||
+		episode_index >= CAMPAIGN_COOP_EPISODE_COUNT)
+	{
+		return false;
+	}
+	if (!mission)
+		return false;
+
+	for (prefix_length = 0; CAMPAIGN_MISSION_DATASTORE_FIELD_PREFIX[prefix_length] != '\0'; prefix_length++)
+		field[prefix_length] = CAMPAIGN_MISSION_DATASTORE_FIELD_PREFIX[prefix_length];
+	field[prefix_length] = (char)('0' + episode_index);
+	field[prefix_length + 1] = '\0';
+
+	if (!datastore_read(
+		CAMPAIGN_MISSION_DATASTORE_FILE,
+		field,
+		(long)sizeof(loaded),
+		&loaded))
+	{
+		return false;
+	}
+	if (!campaign_mission_valid(&loaded))
+		return false;
+
+	*mission = loaded;
+
+	return true;
+}
+
+/* Loaded scenario's trigger_volumes block, or NULL when no scenario is
+ * loaded. The layout-dependent member access lives here in the engine
+ * unit; controls observe it through activate, never by arithmetic. */
+static const struct tag_block *campaign_mission_scenario_volumes(
+	void)
+{
+	const struct scenario *scenario = global_scenario_try_and_get();
+
+	if (!scenario)
+		return NULL;
+
+	return &scenario->trigger_volumes;
+}
+
+/* Last mission record committed by a successful activation. */
+static struct campaign_mission campaign_mission_activated_record;
+static bool campaign_mission_has_activated = false;
+
+int campaign_mission_activate(
+	int16_t episode_index,
+	struct campaign_mission_apply_report *report)
+{
+	struct campaign_mission record;
+	const struct tag_block *volumes;
+	int status;
+
+	if (!campaign_mission_load_episode(episode_index, &record))
+		return CAMPAIGN_MISSION_APPLY_REFUSED;
+
+	volumes = campaign_mission_scenario_volumes();
+	if (!volumes)
+		return CAMPAIGN_MISSION_APPLY_REFUSED;
+
+	status = campaign_mission_apply_volumes(&record, volumes, report);
+	if (status != CAMPAIGN_MISSION_APPLY_OK)
+		return status;
+
+	campaign_mission_activated_record = record;
+	campaign_mission_has_activated = true;
+
+	return status;
+}
+
+const struct campaign_mission *campaign_mission_activated(
+	void)
+{
+	if (!campaign_mission_has_activated)
+		return NULL;
+
+	return &campaign_mission_activated_record;
 }

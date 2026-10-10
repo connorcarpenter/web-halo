@@ -66,6 +66,13 @@ struct campaign_mission
 	struct campaign_mission_encounter encounters[CAMPAIGN_MISSION_MAX_ENCOUNTERS];
 };
 
+/* Engine-resolved mission store. The browser never names it: the commit
+ * entry always writes here, so authored records land in one known file
+ * with one field per episode. Shared with campaign_mission.c so every
+ * per-episode address spells the same field. */
+#define CAMPAIGN_MISSION_DATASTORE_FILE "hazard_missions"
+#define CAMPAIGN_MISSION_DATASTORE_FIELD_PREFIX "hazard_mission_"
+
 /* Hazard Run hostiles: covenant boarders for the shipboard episodes and
  * swarm forms for the later ones. Allies, neutrals, and props
  * (player/marine/crew/monitor/sentinel/mounted_weapon/engineer/assassin)
@@ -171,5 +178,35 @@ int campaign_mission_author_commit(
 	const int16_t anchors[CAMPAIGN_MISSION_MAX_ENCOUNTERS],
 	int16_t encounter_count,
 	int *recorded_out);
+
+/* Loads the per-episode "hazard_mission_<episode>" field of the
+ * engine-resolved mission file and validates it. The out-param is
+ * untouched unless a valid record loads. */
+bool campaign_mission_load_episode(
+	int16_t episode_index,
+	struct campaign_mission *mission);
+
+/* Scenario resolver report (defined in game/campaign_mission_apply.h);
+ * forward-declared so this header stays includable without tag types. */
+struct campaign_mission_apply_report;
+
+/* Activates the authored episode mission against the loaded scenario:
+ * loads the episode record, resolves it against the scenario's
+ * trigger_volumes, and commits the record for the encounter layer on
+ * success. Returns a campaign_mission_apply status
+ * (CAMPAIGN_MISSION_APPLY_OK / _REFUSED / _PENDING_ANCHOR, declared in
+ * game/campaign_mission_apply.h). REFUSED and PENDING_ANCHOR leave any
+ * prior activation untouched: an explicit anchor never silently becomes
+ * the volume default. The report is filled by the resolver run; refusals
+ * before any volume is touched (no record, no scenario) return REFUSED
+ * with the report untouched. */
+int campaign_mission_activate(
+	int16_t episode_index,
+	struct campaign_mission_apply_report *report);
+
+/* Last activated mission record, or NULL before the first successful
+ * activation. Read by the encounter layer; never mutated in place. */
+const struct campaign_mission *campaign_mission_activated(
+	void);
 
 #endif /* CAMPAIGN_MISSION_H */
