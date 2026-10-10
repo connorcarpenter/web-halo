@@ -32,3 +32,14 @@ test('every configured available C input appears exactly once, with platform dep
   assert.match(output, /-fno-builtin-wcslen/);
   assert.doesNotMatch(output, /-flto=/);
 });
+test('authored campaign units join the production and native control graph exactly once', () => {
+  const output = generate(parseArgs(['--lto', 'off']));
+  const authored = ['campaign_coop', 'campaign_mission'].filter(name => fs.existsSync(`source/game/${name}.c`));
+  for (const name of authored) {
+    const edge = `build build/linux/obj/source/game/${name}.o:`;
+    assert.equal(output.split('\n').filter(line => line.startsWith(edge)).length, 1);
+  }
+  const controlEdge = output.split('\n').find(line => line.startsWith('build build/linux/campaign_coop_native_controls:'));
+  for (const name of authored) assert.ok(controlEdge.includes(`build/linux/obj/source/game/${name}.o`));
+  assert.ok(controlEdge.includes('build/linux/obj/port/web/tests/campaign_coop_native_controls_test.o'));
+});
