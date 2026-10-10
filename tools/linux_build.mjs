@@ -55,13 +55,13 @@ export function generate(options, args = []) {
   const config = JSON.parse(fs.readFileSync('port/linux/port.json', 'utf8'));
   const solution = JSON.parse(fs.readFileSync('config/config.json', 'utf8'));
   const n = new Writer();
-  const sdk = files('port/include/xdk', ['.h'], true);
+  const sdk = files('port/include/xdk', ['.h']);
   const sources = files('source', ['.c', '.h'], true);
   const prefix = 'port/linux/include/halo_linux_prefix.h';
   const semantics = 'build/linux/halo_msvc_semantics.h';
   const platformSemantics = 'build/linux/platform_msvc_semantics.h';
   n.rule('configure_native', { command: `sh configure.sh ${flags(args.map(shellQuote))}`, generator: '1', description: 'CONFIGURE native Linux' });
-  n.build('build.ninja', 'configure_native', [], ['configure.sh', 'tools/linux_build.mjs', 'tools/ninja_syntax.mjs', 'config/config.json', 'port/linux/port.json', 'source/game', config.platform_sources, config.game_sources]);
+  n.build('build.ninja', 'configure_native', [], ['configure.sh', 'tools/linux_build.mjs', 'tools/ninja_syntax.mjs', 'config/config.json', 'port/linux/port.json', 'source/game', 'port/include/xdk', config.platform_sources, config.game_sources, 'port/third_party/mbedtls/library', 'port/third_party/musl-math/src']);
   n.variable('linux_cc', literal(shellQuote(options.cc)));
   n.variable('linux_nm', literal(shellQuote(options.nm)));
   n.rule('linux_msvc_semantics', { command: 'node tools/linux_msvc_semantics.mjs --output $out $scan', description: 'LINUX MSVC SEMANTICS $out', restat: '1' });
