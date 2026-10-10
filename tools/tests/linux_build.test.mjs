@@ -34,7 +34,7 @@ test('every configured available C input appears exactly once, with platform dep
 });
 test('authored campaign units join the production and native control graph exactly once', () => {
   const output = generate(parseArgs(['--lto', 'off']));
-  const authored = ['campaign_coop', 'campaign_mission'].filter(name => fs.existsSync(`source/game/${name}.c`));
+  const authored = ['campaign_coop', 'campaign_mission', 'campaign_mission_apply'].filter(name => fs.existsSync(`source/game/${name}.c`));
   for (const name of authored) {
     const edge = `build build/linux/obj/source/game/${name}.o:`;
     assert.equal(output.split('\n').filter(line => line.startsWith(edge)).length, 1);
