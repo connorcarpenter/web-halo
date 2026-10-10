@@ -129,6 +129,19 @@ static inline bool campaign_mission_valid(
 	return true;
 }
 
+/* Author-commit disposition, mirrored as plain ints by the web bridge
+ * status poll. Zero is the only saved outcome; every other code leaves
+ * the store untouched. */
+enum campaign_mission_author_disposition
+{
+	CAMPAIGN_MISSION_AUTHOR_SAVED = 0,
+	CAMPAIGN_MISSION_AUTHOR_BAD_EPISODE = 1,
+	CAMPAIGN_MISSION_AUTHOR_BAD_NAME = 2,
+	CAMPAIGN_MISSION_AUTHOR_BAD_ENCOUNTER = 3,
+	CAMPAIGN_MISSION_AUTHOR_EMPTY_DRAFT = 4,
+	CAMPAIGN_MISSION_AUTHOR_STORE_REFUSED = 5,
+};
+
 /* Validates, then stores the record under the "hazard_mission" field of
  * file_name. Refuses invalid records; the store is untouched then. */
 bool campaign_mission_save(
@@ -140,5 +153,23 @@ bool campaign_mission_save(
 bool campaign_mission_load(
 	const char *file_name,
 	struct campaign_mission *mission);
+
+/* Browser-authoring commit. Assembles a record from flat scalar arrays
+ * (the web bridge mailbox shape), runs the one canonical validator, and
+ * stores it under the per-episode "hazard_mission_<episode>" field of the
+ * engine-resolved mission file -- the caller never names the store, and
+ * the browser holds no asset path. Values must fit int16_t; validation
+ * applies after narrowing. Returns a campaign_mission_author_disposition;
+ * on CAMPAIGN_MISSION_AUTHOR_SAVED the packed (episode << 8) | count
+ * header is written to recorded_out (which may be NULL to skip it). */
+int campaign_mission_author_commit(
+	int16_t episode_index,
+	const char mission_name[CAMPAIGN_MISSION_NAME_CHARACTERS],
+	const int16_t trigger_volumes[CAMPAIGN_MISSION_MAX_ENCOUNTERS],
+	const int16_t actor_types[CAMPAIGN_MISSION_MAX_ENCOUNTERS],
+	const int16_t actor_counts[CAMPAIGN_MISSION_MAX_ENCOUNTERS],
+	const int16_t anchors[CAMPAIGN_MISSION_MAX_ENCOUNTERS],
+	int16_t encounter_count,
+	int *recorded_out);
 
 #endif /* CAMPAIGN_MISSION_H */

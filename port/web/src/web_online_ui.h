@@ -106,6 +106,17 @@ int platform_web_online_set_player_customization(
 	int name8,
 	int name9,
 	int name10);
+int platform_web_campaign_mission_begin(int episode_index);
+int platform_web_campaign_mission_set_name_char(int index, int char_code);
+int platform_web_campaign_mission_add_encounter(
+	int trigger_volume_index,
+	int actor_type,
+	int actor_count,
+	int anchor_index);
+int platform_web_campaign_mission_commit(void);
+int platform_web_campaign_mission_reset(void);
+int platform_web_campaign_mission_status(void);
+int platform_web_campaign_mission_recorded(void);
 int platform_web_online_get_state(void);
 int platform_web_online_get_error(void);
 void platform_web_online_set_transport_state(int state);
