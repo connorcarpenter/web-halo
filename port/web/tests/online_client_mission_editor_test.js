@@ -12,9 +12,34 @@ const vm = require('node:vm');
 
 const webDirectory = path.join(__dirname, '..');
 
+function matchesSelector(node, selector) {
+  const attribute = selector.match(/^([a-z]*)?\[name="([^"]+)"\]$/);
+  if (attribute) {
+    if (attribute[1] && node.tagName !== attribute[1].toUpperCase()) return false;
+    return node.name === attribute[2];
+  }
+  if (selector[0] === '.') {
+    return (node.className || '').split(' ').includes(selector.slice(1));
+  }
+  return node.tagName === selector.toUpperCase();
+}
+
+function selectAll(root, selector) {
+  const found = [];
+  (function walk(node) {
+    for (const child of node.children) {
+      if (matchesSelector(child, selector)) found.push(child);
+      walk(child);
+    }
+  })(root);
+  return found;
+}
+
 function element(overrides) {
   const listeners = {};
-  return Object.assign({
+  const node = Object.assign({
+    tagName: 'DIV',
+    className: '',
     dataset: {},
     disabled: false,
     hidden: false,
@@ -22,7 +47,24 @@ function element(overrides) {
     options: [],
     value: '',
     textContent: '',
+    children: [],
+    parentNode: null,
     addEventListener(type, listener) { listeners[type] = listener; },
+    appendChild(child) {
+      child.parentNode = node;
+      node.children.push(child);
+      return child;
+    },
+    removeChild(child) {
+      node.children = node.children.filter(candidate => candidate !== child);
+      child.parentNode = null;
+      return child;
+    },
+    remove() {
+      if (node.parentNode) node.parentNode.removeChild(node);
+    },
+    querySelector(selector) { return selectAll(node, selector)[0] || null; },
+    querySelectorAll(selector) { return selectAll(node, selector); },
     close() { this.open = false; },
     focus() { this.focused = true; },
     removeAttribute(name) { delete this[name]; },
@@ -31,6 +73,15 @@ function element(overrides) {
     showModal() { this.open = true; },
     listeners,
   }, overrides || {});
+  Object.defineProperty(node, 'firstChild', {
+    get() { return node.children[0] || null; },
+    configurable: true,
+  });
+  return node;
+}
+
+function createElement(tag) {
+  return element({ tagName: String(tag).toUpperCase() });
 }
 
 const elements = {};
@@ -45,7 +96,9 @@ const elements = {};
   'online-join-confirm', 'online-join-form', 'online-join-profile',
   'online-join-summary', 'online-leave-host',
   'online-lives', 'online-map', 'online-map-next', 'online-map-options',
-  'online-mode', 'online-mode-back', 'online-mode-options',
+  'online-mission-add-encounter', 'online-mission-editor',
+  'online-mission-encounters', 'online-mission-episode', 'online-mission-name',
+  'online-mission-save', 'online-mode', 'online-mode-back', 'online-mode-options',
   'online-other-players-on-radar', 'online-player-name', 'online-profile',
   'online-profile-preview', 'online-profile-preview-name',
   'online-progress', 'online-respawn-seconds', 'online-score-to-win',
@@ -59,6 +112,7 @@ const elements = {};
 ].forEach(id => { elements[id] = element(); });
 
 const missionCalls = [];
+const authorPollTimers = [];
 let beginResult = 1;
 let nameCharResult = 1;
 let encounterResult = 1;
@@ -70,6 +124,7 @@ const context = {
   console,
   document: {
     readyState: 'complete',
+    createElement,
     getElementById: id => elements[id],
     querySelector: () => null,
     execCommand: () => true,
@@ -129,7 +184,10 @@ const context = {
   clearInterval() {},
   clearTimeout() {},
   setInterval: () => 0,
-  setTimeout: () => 0,
+  setTimeout: callback => {
+    authorPollTimers.push(callback);
+    return authorPollTimers.length;
+  },
 };
 context.window = context;
 context.globalThis = context;
@@ -280,4 +338,208 @@ function expectedCalls(mission) {
   assert.match(elements['online-status'].textContent, /hasn.t confirmed/i);
 
   console.log('online_client mission editor tests passed');
+})();
+
+(function () {
+  const encounters = () => elements['online-mission-encounters']
+    .querySelectorAll('.mission-encounter');
+  const field = (row, name) => row.querySelector('[name="' + name + '"]');
+  const click = id => elements[id].listeners.click({ target: elements[id] });
+  function fillRow(row, volume, actor, count, anchor) {
+    field(row, 'mission-volume').value = String(volume);
+    field(row, 'mission-actor').value = String(actor);
+    field(row, 'mission-count').value = String(count);
+    field(row, 'mission-anchor').value = String(anchor);
+  }
+
+  /* The editor opens with one default encounter row at canonical defaults. */
+  assert.equal(encounters().length, 1);
+  assert.equal(field(encounters()[0], 'mission-volume').value, '0');
+  assert.equal(field(encounters()[0], 'mission-actor').value, '0');
+  assert.equal(field(encounters()[0], 'mission-count').value, '1');
+  assert.equal(field(encounters()[0], 'mission-anchor').value, '-1');
+
+  /* Rows add up to the eight-encounter cap, then the add stops. */
+  for (let added = 0; added < 7; added++) click('online-mission-add-encounter');
+  assert.equal(encounters().length, 8);
+  click('online-mission-add-encounter');
+  assert.equal(encounters().length, 8);
+  assert.equal(elements['online-mission-add-encounter'].disabled, true);
+
+  /* Removing a row drops it and re-enables adding. */
+  const removeButtons = encounters()[7].querySelectorAll('.mission-encounter-remove');
+  assert.equal(removeButtons.length, 1);
+  elements['online-mission-encounters'].listeners.click({ target: removeButtons[0] });
+  assert.equal(encounters().length, 7);
+  assert.equal(elements['online-mission-add-encounter'].disabled, false);
+
+  /* A filled editor saves exactly through the staged bridge. */
+  missionCalls.length = 0;
+  elements['online-mission-name'].value = 'Deck Breach';
+  elements['online-mission-episode'].value = '1';
+  fillRow(encounters()[0], 4, 0, 3, -1);
+  fillRow(encounters()[1], 9, 10, 16, 2);
+  for (let extra = 2; extra < 7; extra++) fillRow(encounters()[extra], extra, 2, 1, -1);
+  click('online-mission-save');
+  const staged = missionCalls.filter(call => call[0] !== 'reset');
+  assert.equal(staged[0][0], 'begin');
+  assert.equal(staged[staged.length - 1][0], 'commit');
+  assert.equal(staged.filter(call => call[0] === 'encounter').length, 7);
+  assert.match(elements['online-status'].textContent, /Deck Breach/);
+
+  /* A refused field reports the refusal and preserves every staged edit. */
+  missionCalls.length = 0;
+  field(encounters()[0], 'mission-count').value = '99';
+  click('online-mission-save');
+  assert.deepEqual(missionCalls, [],
+    'an invalid editor field must not reach the bridge');
+  assert.match(elements['online-status'].textContent, /count/i);
+  assert.equal(elements['online-mission-name'].value, 'Deck Breach');
+  assert.equal(field(encounters()[0], 'mission-count').value, '99');
+  assert.equal(encounters().length, 7);
+
+  console.log('online_client mission editor DOM tests passed');
+})();
+
+(function () {
+  /* Hazard Run editor roundtrip (Usher 61730): a requested save closes its
+     own loop. The drain confirms on the game thread, so the browser must
+     re-poll to terminal by itself: saved (recorded header matches the
+     staged episode + encounter count), refused (draft reset, disposition
+     reported), or bounded expiry (pending kept for a manual check). A
+     single immediate poll is not the roundtrip. */
+  function drainAuthorTimers() {
+    let ran = 0;
+    while (authorPollTimers.length) {
+      authorPollTimers.shift()();
+      ran++;
+    }
+    return ran;
+  }
+
+  function requestSave() {
+    authorPollTimers.length = 0;
+    missionCalls.length = 0;
+    missionStatus = 0;
+    missionRecorded = -1;
+    context.HaloOnline.missionSave(validMission());
+  }
+
+  /* A requested save schedules its own author poll. */
+  requestSave();
+  assert.equal(authorPollTimers.length, 1,
+    'a requested save must schedule its own author poll');
+  const immediate = context.HaloOnline.missionSaveStatus();
+  assert.equal(immediate.pending, true);
+
+  /* One tick while the drain is silent stays pending and rearms. */
+  authorPollTimers.shift()();
+  assert.equal(authorPollTimers.length, 1,
+    'a silent drain must leave the loop armed');
+
+  /* The recorded header matching the staged save closes the loop with the
+     staged identity, and nothing stays armed. */
+  missionRecorded = (1 << 8) | 2;
+  drainAuthorTimers();
+  assert.equal(authorPollTimers.length, 0,
+    'a terminal save must disarm the loop');
+  assert.match(elements['online-status'].textContent, /Deck Breach.*Episode 2.*2 encounters/);
+  const closed = context.HaloOnline.missionSaveStatus();
+  assert.equal(closed.pending, false);
+  assert.match(elements['online-status'].textContent, /no mission save is pending/i);
+
+  /* A refusal mid-sequence resets the draft and closes the loop. */
+  requestSave();
+  missionStatus = 3;
+  drainAuthorTimers();
+  assert.equal(authorPollTimers.length, 0,
+    'a refused save must disarm the loop');
+  assert.deepEqual(missionCalls.filter(call => call[0] === 'reset').length, 1);
+  assert.match(elements['online-status'].textContent, /encounter/i);
+
+  /* A stale timer from an overwritten save polls nothing. */
+  requestSave();
+  context.HaloOnline.missionSave(validMission());
+  assert.equal(authorPollTimers.length, 2);
+  missionRecorded = (1 << 8) | 2;
+  authorPollTimers.shift()();
+  assert.equal(authorPollTimers.length, 1,
+    'a stale save timer must not close the newer save');
+  assert.doesNotMatch(elements['online-status'].textContent, /Mission saved/);
+  drainAuthorTimers();
+  assert.match(elements['online-status'].textContent, /Deck Breach.*Episode 2.*2 encounters/);
+
+  /* A silent drain exhausts the bound (450 ticks of 200 ms = 90 s), stops
+     re-arming, and keeps the save pending for a manual check. */
+  requestSave();
+  const ran = drainAuthorTimers();
+  assert.equal(ran, 450);
+  assert.equal(authorPollTimers.length, 0);
+  const expired = context.HaloOnline.missionSaveStatus();
+  assert.equal(expired.pending, true);
+  assert.match(elements['online-status'].textContent, /hasn.t confirmed/i);
+
+  console.log('online_client mission editor roundtrip tests passed');
+})();
+
+(function () {
+  /* Hazard Run saved-receipt binding (Finn 61813): the terminal saved
+     receipt is retained for the future activated-episode readback, which
+     compares against exactly this shape. A new save request supersedes
+     it; a refusal leaves the last proven receipt standing. */
+  missionCalls.length = 0;
+  missionStatus = 0;
+  missionRecorded = -1;
+  authorPollTimers.length = 0;
+
+  /* Receipts cross the vm-context boundary, so compare field-wise:
+     deepEqual sees two realms' prototypes, not the values. */
+  function receiptEqual(actual, expected) {
+    if (expected === null) return actual === null;
+    return !!actual && actual.name === expected.name &&
+      actual.episodeIndex === expected.episodeIndex &&
+      actual.encounterCount === expected.encounterCount;
+  }
+
+  /* Earlier blocks share this session, so the entry receipt is whatever
+     they last proved: null or a well-shaped receipt, never undefined. */
+  const entry = context.HaloOnline.missionLastSaved();
+  assert.ok(entry === null || receiptEqual(entry, {
+    name: entry.name,
+    episodeIndex: entry.episodeIndex,
+    encounterCount: entry.encounterCount,
+  }));
+
+  context.HaloOnline.missionSave(validMission());
+  assert.ok(receiptEqual(context.HaloOnline.missionLastSaved(), entry),
+    'a requested save must not move the retained receipt');
+  missionRecorded = (1 << 8) | 2;
+  while (authorPollTimers.length) authorPollTimers.shift()();
+  assert.ok(receiptEqual(context.HaloOnline.missionLastSaved(), {
+    name: 'Deck Breach',
+    episodeIndex: 1,
+    encounterCount: 2,
+  }));
+
+  /* A refused save keeps the last proven receipt: nothing was written. A
+     new request does not supersede it either; only a terminal save does. */
+  const proven = context.HaloOnline.missionLastSaved();
+  context.HaloOnline.missionSave(validMission());
+  assert.ok(receiptEqual(context.HaloOnline.missionLastSaved(), proven),
+    'a new request must not supersede the last proven receipt');
+  missionStatus = 3;
+  while (authorPollTimers.length) authorPollTimers.shift()();
+  missionStatus = 0;
+  context.HaloOnline.missionSave(validMission());
+  missionRecorded = (1 << 8) | 2;
+  while (authorPollTimers.length) authorPollTimers.shift()();
+  const first = context.HaloOnline.missionLastSaved();
+  context.HaloOnline.missionSave(validMission());
+  missionStatus = 5;
+  while (authorPollTimers.length) authorPollTimers.shift()();
+  missionStatus = 0;
+  assert.ok(receiptEqual(context.HaloOnline.missionLastSaved(), first),
+    'a refused save must not move the retained receipt');
+
+  console.log('online_client mission saved-receipt tests passed');
 })();

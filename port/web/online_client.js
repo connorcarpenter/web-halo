@@ -223,6 +223,11 @@
     elements.livePlayerOnline = byId("live-player-online");
     elements.livePlayerCampaign = byId("live-player-campaign");
     elements.livePlayerToday = byId("live-player-today");
+    elements.missionName = byId("online-mission-name");
+    elements.missionEpisode = byId("online-mission-episode");
+    elements.missionEncounters = byId("online-mission-encounters");
+    elements.missionAddEncounter = byId("online-mission-add-encounter");
+    elements.missionSave = byId("online-mission-save");
   }
 
   function playerCountLabel(count, suffix) {
@@ -1144,6 +1149,8 @@
       episodeIndex: mission.episodeIndex,
       encounterCount: mission.encounters.length,
     };
+    session.missionPollGeneration = (session.missionPollGeneration || 0) + 1;
+    scheduleMissionAuthorPoll(session.missionPollGeneration, MISSION_AUTHOR_POLL_MAX_TICKS);
     setHeader("Mission sent to Halo", "waiting");
     setStatus(missionEditorLabel(mission) + " — Halo is saving it…");
     return mission;
@@ -1168,6 +1175,14 @@
     }
     var recorded = wasmFunction("platform_web_campaign_mission_recorded")();
     if (recorded === ((pending.episodeIndex << 8) | pending.encounterCount)) {
+      /* Retain the proven receipt for the future activated-episode
+         readback (Finn 61813): it compares against exactly this shape.
+         A refusal never moves it; only a terminal save or a new request. */
+      session.lastSavedMission = {
+        name: pending.name,
+        episodeIndex: pending.episodeIndex,
+        encounterCount: pending.encounterCount,
+      };
       session.mission = null;
       setHeader("Mission saved", "connected");
       setStatus(pending.name + " · Episode " + (pending.episodeIndex + 1) + " · " +
@@ -1190,14 +1205,189 @@
       setStatus(missionRefusalText(status));
       return { saved: false, pending: false, status: status };
     }
-    setHeader("Mission sent to Halo", "waiting");
-    setStatus(pending.name + " — Halo hasn't confirmed the save yet.");
+    if (!pending.reported) {
+      pending.reported = true;
+      setHeader("Mission sent to Halo", "waiting");
+      setStatus(pending.name + " — Halo hasn't confirmed the save yet.");
+    }
     return { saved: false, pending: true };
   }
 
   function missionSaveStatus() {
     if (!session.runtimeReady) throw new Error("Halo is still starting.");
+    if (session.mission) session.mission.reported = false;
     return pollMissionAuthor();
+  }
+
+  function missionLastSaved() {
+    if (!session.runtimeReady) throw new Error("Halo is still starting.");
+    return session.lastSavedMission || null;
+  }
+
+  /* Hazard Run editor roundtrip (Usher 61730): the drain confirms on the
+     game thread, so a requested save re-polls to terminal by itself on a
+     bounded 200 ms tick (450 ticks = 90 s, the lobby join timeout). A
+     terminal save or refusal disarms the loop; expiry keeps the save
+     pending for a manual check. A superseded save's timer polls nothing:
+     the generation at schedule time must still be current. */
+  var MISSION_AUTHOR_POLL_MILLISECONDS = 200;
+  var MISSION_AUTHOR_POLL_MAX_TICKS = 450;
+
+  function scheduleMissionAuthorPoll(generation, ticksLeft) {
+    if (!session.mission || session.missionPollGeneration !== generation) return;
+    if (ticksLeft <= 0) {
+      setHeader("Mission sent to Halo", "waiting");
+      setStatus(session.mission.name + " — Halo hasn't confirmed the save yet.");
+      return;
+    }
+    global.setTimeout(function() {
+      if (!session.mission || session.missionPollGeneration !== generation) return;
+      pollMissionAuthor();
+      if (session.mission) scheduleMissionAuthorPoll(generation, ticksLeft - 1);
+    }, MISSION_AUTHOR_POLL_MILLISECONDS);
+  }
+
+  /* Hazard Run mission row editor (Usher 61495; bridge contract Finn
+     61479): a visual encounter-row editor inside the online dialog. Rows
+     are the single source of truth — the save button reads them through
+     the same normalize/stage path as the data API, and a refusal only
+     reports through the status line: inputs are never cleared except by
+     the author. The editor stays available outside room operations; the
+     staged bridge is independent mission state. */
+  var CAMPAIGN_MISSION_HOSTILE_ACTOR_LABELS = [
+    [0, "Elite"],
+    [1, "Jackal"],
+    [2, "Grunt"],
+    [3, "Hunter"],
+    [9, "Combat form"],
+    [10, "Infection form"],
+    [11, "Carrier form"],
+  ];
+
+  function missionEncounterRows() {
+    if (!elements.missionEncounters ||
+        typeof elements.missionEncounters.querySelectorAll !== "function") return [];
+    return Array.prototype.slice.call(
+      elements.missionEncounters.querySelectorAll(".mission-encounter"));
+  }
+
+  function missionLabeledNumber(labelText, name, value, minimum, maximum) {
+    var label = document.createElement("label");
+    label.className = "advanced-number";
+    label.textContent = labelText;
+    var input = document.createElement("input");
+    input.type = "number";
+    input.name = name;
+    input.min = String(minimum);
+    if (maximum !== null && maximum !== undefined) input.max = String(maximum);
+    input.step = "1";
+    input.value = String(value);
+    label.appendChild(input);
+    return label;
+  }
+
+  function missionActorSelect() {
+    var label = document.createElement("label");
+    label.className = "advanced-number";
+    label.textContent = "Actor";
+    var select = document.createElement("select");
+    select.name = "mission-actor";
+    CAMPAIGN_MISSION_HOSTILE_ACTOR_LABELS.forEach(function(entry) {
+      var option = document.createElement("option");
+      option.value = String(entry[0]);
+      option.textContent = entry[1];
+      select.appendChild(option);
+    });
+    select.value = "0";
+    label.appendChild(select);
+    return label;
+  }
+
+  function syncMissionEditor() {
+    var rows = missionEncounterRows();
+    rows.forEach(function(row, index) {
+      var legend = row.querySelector("legend");
+      if (legend) legend.textContent = "Encounter " + (index + 1);
+    });
+    if (elements.missionAddEncounter) {
+      elements.missionAddEncounter.disabled =
+        rows.length >= CAMPAIGN_MISSION_MAX_ENCOUNTERS;
+    }
+  }
+
+  function addMissionEncounterRow() {
+    if (!elements.missionEncounters || typeof document.createElement !== "function") return false;
+    if (missionEncounterRows().length >= CAMPAIGN_MISSION_MAX_ENCOUNTERS) {
+      syncMissionEditor();
+      return false;
+    }
+    var row = document.createElement("fieldset");
+    row.className = "advanced-fields mission-encounter";
+    var legend = document.createElement("legend");
+    legend.textContent = "Encounter";
+    row.appendChild(legend);
+    row.appendChild(missionLabeledNumber("Trigger volume", "mission-volume", 0, 0, null));
+    row.appendChild(missionActorSelect());
+    row.appendChild(missionLabeledNumber("Count", "mission-count", 1, 1,
+      CAMPAIGN_MISSION_MAX_ACTORS_PER_ENCOUNTER));
+    row.appendChild(missionLabeledNumber("Anchor (−1 = none)", "mission-anchor",
+      CAMPAIGN_MISSION_NO_ANCHOR, CAMPAIGN_MISSION_NO_ANCHOR, null));
+    var remove = document.createElement("button");
+    remove.className = "mission-encounter-remove";
+    remove.type = "button";
+    remove.textContent = "Remove";
+    row.appendChild(remove);
+    elements.missionEncounters.appendChild(row);
+    syncMissionEditor();
+    return true;
+  }
+
+  function readMissionEditor() {
+    return {
+      name: elements.missionName ? elements.missionName.value : "",
+      episodeIndex: elements.missionEpisode ? elements.missionEpisode.value : "",
+      encounters: missionEncounterRows().map(function(row) {
+        function field(name) {
+          var input = row.querySelector('[name="' + name + '"]');
+          return input ? input.value : "";
+        }
+        return {
+          triggerVolumeIndex: field("mission-volume"),
+          actorType: field("mission-actor"),
+          actorCount: field("mission-count"),
+          anchorIndex: field("mission-anchor"),
+        };
+      }),
+    };
+  }
+
+  function saveMissionEditor() {
+    try {
+      missionSave(readMissionEditor());
+      missionSaveStatus();
+    } catch (error) {
+      setStatus(error.message, "error");
+    }
+  }
+
+  function initializeMissionEditor() {
+    if (!elements.missionEncounters || !elements.missionAddEncounter ||
+        !elements.missionSave || typeof document.createElement !== "function") return;
+    if (missionEncounterRows().length === 0) addMissionEncounterRow();
+    elements.missionAddEncounter.addEventListener("click", function() {
+      addMissionEncounterRow();
+    });
+    elements.missionEncounters.addEventListener("click", function(event) {
+      var target = event && event.target;
+      if (!target || target.className !== "mission-encounter-remove") return;
+      var row = target.parentNode;
+      if (row && typeof row.remove === "function") row.remove();
+      else if (row && row.parentNode) row.parentNode.removeChild(row);
+      syncMissionEditor();
+    });
+    elements.missionSave.addEventListener("click", function() {
+      saveMissionEditor();
+    });
   }
 
   function connectedFriendsLabel(count) {
@@ -2452,6 +2642,7 @@
     restoreHostSettings();
     restorePlayerProfile();
     attachEvents();
+    initializeMissionEditor();
     renderRoster();
     setBusy(false);
     startPresencePolling();
@@ -2481,6 +2672,7 @@
     campaignHost: campaignHost,
     missionSave: missionSave,
     missionSaveStatus: missionSaveStatus,
+    missionLastSaved: missionLastSaved,
     join: join,
     leave: function() { return leave(true); },
   });
