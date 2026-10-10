@@ -32,6 +32,16 @@ Compiler readback is 6.0.12 (5488e0871d46d19a3209988190fa6a653126256f);
 SDK manager source is 35ff8a6d150541276abbc6bae512ca90bcfbe220. Installation
 and version readback are not browser C qualification.
 
+The Diax host archive uses the installed toolchain recorded in
+`port/web/diax_guest/rust-toolchain.pin`, with `rust-src`. Its ordinary Cargo
+entry rebuilds `std` through `-Zbuild-std=std,panic_abort` and enables
+`atomics`, `bulk-memory` and the pthread link argument to match the existing
+engine's shared-memory ABI. This follows Rust's
+[Emscripten ABI compatibility guidance](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-emscripten.html#emscripten-abi-compatibility).
+These compiler settings apply to the outer Rust/C host; the interpreter still
+owns separate guest linear memory. No guest entry becomes a JS export. A
+successful archive build alone does not qualify final linking or runtime.
+
 The historical launcher `tools/web_run.py`, ISO extraction and development
 server still require migration. Do not execute those Python paths under the
 current no-Python contract. No game data or runtime operation is needed for graph

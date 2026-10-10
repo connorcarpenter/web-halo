@@ -18,6 +18,13 @@ actual=$(git -C ../diax rev-parse HEAD)
 [[ $actual == "$expected" ]] || { echo "Diax source mismatch: expected $expected, read $actual" >&2; exit 1; }
 printf 'Diax source %s; target wasm32-unknown-emscripten\n' "$actual"
 linker=$(jq -cn --arg compiler "$compiler" '$compiler')
-cargo build --locked --manifest-path port/web/diax_guest/Cargo.toml --lib --release \
+toolchain=$(cat port/web/diax_guest/rust-toolchain.pin)
+printf 'Rust host archive toolchain: %s\n' "$toolchain"
+# Rebuild std with the host's pthread ABI too: precompiled rustup std is not
+# qualified against this local Emscripten version/settings. These features
+# describe the OUTER engine module, not the interpreted guest linear memory.
+cargo "+$toolchain" build -Zbuild-std=std,panic_abort --locked \
+  --manifest-path port/web/diax_guest/Cargo.toml --lib --release \
   --target wasm32-unknown-emscripten --target-dir build/diax-guest -j 4 \
-  --config "target.wasm32-unknown-emscripten.linker=$linker"
+  --config "target.wasm32-unknown-emscripten.linker=$linker" \
+  --config 'target.wasm32-unknown-emscripten.rustflags=["-C","target-feature=+atomics,+bulk-memory","-C","link-arg=-pthread"]'

@@ -50,7 +50,7 @@ edge build/web/sdl-install/lib/libSDL3.a web_sdl tools/web_sdl.sh build/native-d
 diax_archive=build/diax-guest/wasm32-unknown-emscripten/release/libhalo_diax_guest.a
 printf 'rule web_diax_guest\n  command = bash tools/diax_guest_build.sh --sdk %s\n  description = WEB DIAX GUEST\n  depfile = build/diax-guest/wasm32-unknown-emscripten/release/libhalo_diax_guest.d\n' "$(literal "$(sq "$emsdk")")"
 mapfile -d '' -t diax_sources < <(find port/web/diax_guest/src -type f -name '*.rs' -print0 | sort -z)
-edge "$diax_archive" web_diax_guest tools/diax_guest_build.sh port/web/diax_guest/Cargo.toml port/web/diax_guest/Cargo.lock port/web/diax_guest/diax-main.pin "${diax_sources[@]}"
+edge "$diax_archive" web_diax_guest tools/diax_guest_build.sh port/web/diax_guest/Cargo.toml port/web/diax_guest/Cargo.lock port/web/diax_guest/diax-main.pin port/web/diax_guest/rust-toolchain.pin "${diax_sources[@]}"
 printf '%s\n' 'rule web_msvc_semantics' '  command = node tools/linux_msvc_semantics.mjs --output $out $scan' '  description = WEB MSVC SEMANTICS $out' '  restat = 1'
 mapfile -d '' -t sdk_headers < <(find "$sdk" -maxdepth 1 -type f -name '*.h' -print0 | sort -z)
 mapfile -d '' -t game_headers < <(find source -type f \( -name '*.c' -o -name '*.h' \) -print0 | sort -z)
