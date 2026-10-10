@@ -23,6 +23,12 @@
 
 #include <stdio.h>
 
+/* The game-lib build puts port/linux/include/stdio.h first, which redirects
+ * printf to halo_linux_printf (implemented in msvc_crt.c, outside the
+ * two-object controls link). Test reporting is not game behavior, so use
+ * the host libc printer instead; production bytes are unaffected. */
+#undef printf
+
 #include "cseries.h"
 #include "memory/data.h"
 #include "game/players.h"
