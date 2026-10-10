@@ -21,6 +21,10 @@ int32_t halo_diax_call(struct halo_diax_guest *guest, int32_t init,
  * to retrieve output. The caller decodes/applies the game's action vocabulary. */
 int32_t halo_diax_take_output(struct halo_diax_guest *guest,
     uint8_t *output, uint32_t capacity);
+/* Adapter call+copy. An oversized batch faults the guest until checkpoint
+ * rollback; never retry a guest event whose output did not fit. */
+int32_t halo_diax_event(struct halo_diax_guest *guest,
+    const uint8_t *input, uint32_t len, uint8_t *actions, uint32_t capacity);
 int32_t halo_diax_capture(struct halo_diax_guest *guest,
     uint8_t *image, uint32_t capacity);
 /* Fresh instance from stored SAME blob, memory restored without __init.

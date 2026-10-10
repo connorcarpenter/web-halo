@@ -33,9 +33,9 @@
 
 enum
 {
-	/* A slot is missing, the kind/ABI/blob/generation check fails, a
-	 * pointer is missing, or the guest reports an error. Nothing is
-	 * consumed and bound state is left intact. */
+	/* Preflight refusals do not call the guest. Runtime errors retain
+	 * binding/fence metadata but may fault mutated guest state; only a
+	 * coherent saved-image restore permits further execution then. */
 	CAMPAIGN_COOP_ADAPTER_REFUSED = -1,
 
 	/* The call completed against the bound generation. */

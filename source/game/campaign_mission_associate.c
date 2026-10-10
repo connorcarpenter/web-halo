@@ -29,7 +29,7 @@ int campaign_mission_associate(
 			*bound_out = 0;
 		return CAMPAIGN_MISSION_APPLY_REFUSED;
 	}
-	if (!scenario)
+	if (!scenario || scenario->ai_encounters.count < 0)
 	{
 		if (bound_out)
 			*bound_out = 0;

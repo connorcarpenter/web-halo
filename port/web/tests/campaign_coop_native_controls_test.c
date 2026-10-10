@@ -414,6 +414,12 @@ int main(
 		CHECK(campaign_mission_activated()->encounter_count == 0);
 		CHECK(campaign_mission_bound_table(&count) != 0 && count == 0);
 		CHECK(stub_tag_reads == 0);
+		empty_scenario.trigger_volumes.count = -1;
+		CHECK(campaign_mission_activate_bound(0, &report, &bound) == CAMPAIGN_MISSION_APPLY_REFUSED);
+		empty_scenario.trigger_volumes.count = 0;
+		empty_scenario.ai_encounters.count = -1;
+		CHECK(campaign_mission_activate_bound(0, &report, &bound) == CAMPAIGN_MISSION_APPLY_REFUSED);
+		empty_scenario.ai_encounters.count = 0;
 		/* A malformed replacement never overwrites the work-only save. */
 		CHECK(campaign_mission_author_commit(0, name,
 			0, 0, 0, 0, -1, &recorded) == CAMPAIGN_MISSION_AUTHOR_BAD_ENCOUNTER);

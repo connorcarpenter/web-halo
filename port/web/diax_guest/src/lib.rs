@@ -71,6 +71,9 @@ impl Guest {
     }
 
     fn take_output(&mut self, out: &mut [u8]) -> i32 {
+        if self.faulted {
+            return self.refuse("faulted guest output cannot be applied; restore required");
+        }
         let Some(bytes) = self.pending.as_ref() else {
             return self.refuse("no guest output outstanding");
         };
@@ -97,8 +100,22 @@ impl Guest {
         image.len() as i32
     }
 
+    fn event(&mut self, input: &[u8], out: &mut [u8]) -> i32 {
+        let produced = self.call(false, input);
+        if produced < 0 {
+            return produced;
+        }
+        if out.len() < produced as usize {
+            // The serial did not advance, but guest state may have. Never
+            // execute this event twice or apply its uncommitted batch later.
+            self.faulted = true;
+            return self.refuse("action exceeds adapter output buffer; guest faulted");
+        }
+        self.take_output(out)
+    }
+
     fn restore(&mut self, image: &[u8]) -> i32 {
-        if !self.initialized || self.pending.is_some() {
+        if !self.initialized || (self.pending.is_some() && !self.faulted) {
             return self.refuse("restore requires an initialized guest with output consumed");
         }
         // Stage from the exact stored blob; never initialize after restore and
@@ -111,6 +128,7 @@ impl Guest {
             Ok(runtime) => {
                 self.runtime = runtime;
                 self.faulted = false;
+                self.pending = None;
                 self.error.clear();
                 0
             }
@@ -259,6 +277,28 @@ pub unsafe extern "C" fn halo_diax_error(guest: *const Guest, bytes: *mut u8, ca
     out[..guest.error.len()].copy_from_slice(guest.error.as_bytes());
     out[guest.error.len()] = 0;
     guest.error.len() as i32
+}
+
+/// # Safety
+/// Live worker-owned handle; input and output are valid disjoint buffers.
+#[no_mangle]
+pub unsafe extern "C" fn halo_diax_event(
+    guest: *mut Guest,
+    bytes: *const u8,
+    len: u32,
+    actions: *mut u8,
+    capacity: u32,
+) -> i32 {
+    let Some(guest) = guest.as_mut() else {
+        return -1;
+    };
+    let Some(input) = input(bytes, len) else {
+        return guest.refuse("invalid input buffer");
+    };
+    let Some(out) = output(actions, capacity) else {
+        return guest.refuse("invalid output buffer");
+    };
+    guest.event(input, out)
 }
 
 #[cfg(test)]

@@ -109,3 +109,20 @@ fn c_boundary_copies_bytes_and_refuses_invalid_buffers() {
         halo_diax_destroy(guest);
     }
 }
+
+#[test]
+fn adapter_short_output_faults_until_checkpoint_rollback() {
+    let mut guest = Guest::load(&blob()).unwrap();
+    assert_eq!(guest.call(true, &[]), 1);
+    consume(&mut guest);
+    let mut image = vec![0; WASM_PAGE_BYTES];
+    assert_eq!(guest.capture(&mut image), WASM_PAGE_BYTES as i32);
+    assert_eq!(guest.event(&[], &mut []), -1);
+    assert_eq!(guest.call(false, &[]), -1);
+    assert_eq!(guest.take_output(&mut [0]), -1);
+    assert_eq!(guest.capture(&mut image), -1);
+    assert_eq!(guest.restore(&image), 0);
+    let mut actions = [0];
+    assert_eq!(guest.event(&[], &mut actions), 1);
+    assert_eq!(actions, [11]);
+}

@@ -64,7 +64,7 @@ static inline int campaign_mission_resolve(
 	int16_t resolved = 0;
 	int16_t pending = 0;
 
-	if (!mission || !campaign_mission_valid(mission))
+	if (!mission || !campaign_mission_valid(mission) || trigger_volume_count < 0)
 		return CAMPAIGN_MISSION_APPLY_REFUSED;
 
 	for (encounter = 0; encounter < mission->encounter_count; encounter++)
