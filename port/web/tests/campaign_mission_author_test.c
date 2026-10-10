@@ -24,17 +24,6 @@
 
 #include "game/campaign_mission.c"
 
-/* cseries.h maps libc string/mem calls to engine cs* names (csstrncmp,
- * csmemcpy, ...) implemented in cseries.c, outside the controls link.
- * Fixture helpers are not game behavior, so bind the ones this TU uses
- * back to libc; production bytes are unaffected. */
-#undef memcmp
-#undef memset
-#undef strncmp
-#undef strncpy
-#undef strlen
-#undef memcpy
-
 #define AUTHOR_STUB_MAX_FIELDS 8
 #define AUTHOR_STUB_FIELD_NAME_LIMIT 64
 #define AUTHOR_STUB_FIELD_DATA_LIMIT 256
