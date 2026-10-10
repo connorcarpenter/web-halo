@@ -8,6 +8,7 @@
 #include "cseries/cseries.h"
 #include "game/campaign_mission.h"
 #include "game/campaign_mission_apply.h"
+#include "game/campaign_mission_associate.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "tag_files/files.h"
@@ -213,4 +214,84 @@ const struct campaign_mission *campaign_mission_activated(
 		return NULL;
 
 	return &campaign_mission_activated_record;
+}
+
+/* Last bound table committed by a fully bound activation. At most one
+ * binding per encounter, so the record's encounter cap sizes it. */
+static struct campaign_mission_binding campaign_mission_bound_bindings[
+	CAMPAIGN_MISSION_MAX_ENCOUNTERS];
+static int16_t campaign_mission_bound_count = 0;
+static bool campaign_mission_has_bound = false;
+
+int campaign_mission_activate_bound(
+	int16_t episode_index,
+	struct campaign_mission_apply_report *report,
+	int16_t *bound_out)
+{
+	struct campaign_mission record;
+	const struct scenario *scenario = global_scenario_try_and_get();
+	const struct tag_block *volumes;
+	struct campaign_mission_binding staged[
+		CAMPAIGN_MISSION_MAX_ENCOUNTERS];
+	int16_t bound = 0;
+	int16_t entry;
+	int status;
+
+	if (!campaign_mission_load_episode(episode_index, &record))
+	{
+		if (bound_out)
+			*bound_out = 0;
+		return CAMPAIGN_MISSION_APPLY_REFUSED;
+	}
+
+	volumes = campaign_mission_scenario_volumes();
+	if (!volumes)
+	{
+		if (bound_out)
+			*bound_out = 0;
+		return CAMPAIGN_MISSION_APPLY_REFUSED;
+	}
+
+	status = campaign_mission_apply_volumes(&record, volumes, report);
+	if (status == CAMPAIGN_MISSION_APPLY_REFUSED)
+	{
+		if (bound_out)
+			*bound_out = 0;
+		return status;
+	}
+
+	/* OK and PENDING_ANCHOR both continue: the association resolves
+	 * the pending half into bound-or-refused, never pending. */
+	if (!scenario ||
+		campaign_mission_associate(
+			&record, scenario, staged,
+			CAMPAIGN_MISSION_MAX_ENCOUNTERS, &bound) !=
+		CAMPAIGN_MISSION_APPLY_OK)
+	{
+		if (bound_out)
+			*bound_out = bound;
+		return CAMPAIGN_MISSION_APPLY_REFUSED;
+	}
+
+	campaign_mission_activated_record = record;
+	campaign_mission_has_activated = true;
+	for (entry = 0; entry < bound; entry++)
+		campaign_mission_bound_bindings[entry] = staged[entry];
+	campaign_mission_bound_count = bound;
+	campaign_mission_has_bound = true;
+
+	if (bound_out)
+		*bound_out = bound;
+	return CAMPAIGN_MISSION_APPLY_OK;
+}
+
+const struct campaign_mission_binding *campaign_mission_bound_table(
+	int16_t *count_out)
+{
+	if (!campaign_mission_has_bound)
+		return NULL;
+
+	if (count_out)
+		*count_out = campaign_mission_bound_count;
+	return campaign_mission_bound_bindings;
 }
