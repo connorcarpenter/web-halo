@@ -44,6 +44,10 @@ test('authored campaign units join the production and native control graph exact
   assert.ok(controlEdge.includes('build/linux/obj/port/web/tests/campaign_coop_native_controls_test.o'));
   if (fs.existsSync('port/web/tests/campaign_mission_author_test.c')) {
     assert.match(output, /build build\/linux\/campaign_mission_author_controls: native_control_link build\/linux\/obj\/port\/web\/tests\/campaign_mission_author_test\.o/);
+    const authorEdge = output.split('\n').find(line => line.startsWith('build build/linux/campaign_mission_author_controls:'));
+    for (const provider of ['source/cseries/cseries', 'source/cseries/cseries_windows', 'source/cseries/stack_walk_windows', 'port/linux/src/msvc_crt']) {
+      assert.ok(authorEdge.includes(`build/linux/obj/${provider}.o`), provider);
+    }
     assert.match(output, /build campaign-author-controls: native_control_run build\/linux\/campaign_mission_author_controls/);
   }
 });
