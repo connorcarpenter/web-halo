@@ -55,7 +55,9 @@ test('authored campaign units join the production and native control graph exact
       assert.ok(authorEdge.includes(`build/linux/obj/${provider}.o`), provider);
     }
     assert.match(output, /build campaign-author-controls: native_control_run build\/linux\/campaign_mission_author_controls/);
-    for (const family of ['author', 'datastore', 'activation']) {
+    assert.match(output, /build build\/linux\/obj\/source\/game\/campaign_mission_associate.o: linux_cc/);
+    assert.ok(productionEdge.includes('build/linux/obj/source/game/campaign_mission_associate.o'));
+    for (const family of ['author', 'datastore', 'activation', 'anchor']) {
       const edge = output.split('\n').find(line => line.startsWith(`build build/linux/campaign_mission_${family}_controls:`));
       assert.ok(edge.includes(` | build/linux/obj/port/web/tests/campaign_mission_${family}_test.o`));
       assert.ok(!edge.includes('source/shell/shell_entry.o'));

@@ -95,7 +95,7 @@ export function generate(options, args = []) {
     if (project.name === 'halobetacache') campaignFlags = game;
     const selected = project.objects.filter(object => object.status !== 'MISSING' && /\.c$/i.test(object.name) && !config.exclude_sources.includes(object.name)).map(object => object.name);
     // Campaign slice is authored after the imported config; never omit its implementation.
-    if (project.name === 'halobetacache') for (const authored of ['source/game/campaign_coop.c', 'source/game/campaign_mission.c', 'source/game/campaign_mission_apply.c', 'source/main/main_fatal.c', 'source/shell/shell_entry.c']) {
+    if (project.name === 'halobetacache') for (const authored of ['source/game/campaign_coop.c', 'source/game/campaign_mission.c', 'source/game/campaign_mission_apply.c', 'source/game/campaign_mission_associate.c', 'source/main/main_fatal.c', 'source/shell/shell_entry.c']) {
       if (fs.existsSync(authored) && !selected.includes(authored)) selected.push(authored);
     }
     for (const source of selected) add(source, game);
@@ -149,7 +149,7 @@ export function generate(options, args = []) {
     });
     // Reusable engine providers contain no program entry; each control supplies its own main.
     const controlProviders = objects.filter(object => object !== 'build/linux/obj/source/shell/shell_entry.o');
-    for (const family of ['author', 'datastore', 'activation']) {
+    for (const family of ['author', 'datastore', 'activation', 'anchor']) {
       const authorControl = `port/web/tests/campaign_mission_${family}_test.c`;
       if (!fs.existsSync(authorControl)) continue;
       const authorObject = `build/linux/obj/port/web/tests/campaign_mission_${family}_test.o`;
