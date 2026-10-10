@@ -75,7 +75,7 @@ while IFS= read -r project; do
   while IFS= read -r define; do flags+=" $(sq "-D$define")"; done < <(jq -r '.options.defines // [] | .[]' <<<"$project")
   while IFS= read -r inc; do flags+=" -I$(sq "$inc")"; done < <(jq -r '.options.include_dirs // [] | .[] | select(. != "xbox/include")' <<<"$project")
   mapfile -t selected < <(jq -r --slurpfile port port/linux/port.json '.objects[] | select(.status != "MISSING") | .name | select(test("\\.c$";"i")) | select(. as $n | $port[0].exclude_sources | index($n) | not)' <<<"$project")
-  for authored in source/game/campaign_coop.c source/game/campaign_mission.c source/game/campaign_mission_apply.c source/main/main_fatal.c; do
+  for authored in source/game/campaign_coop.c source/game/campaign_mission.c source/game/campaign_mission_apply.c source/main/main_fatal.c source/shell/shell_entry.c; do
     if [[ -f $authored && " ${selected[*]} " != *" $authored "* ]]; then selected+=("$authored"); fi
   done
   for source in "${selected[@]}"; do

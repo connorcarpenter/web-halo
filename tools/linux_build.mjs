@@ -95,7 +95,7 @@ export function generate(options, args = []) {
     if (project.name === 'halobetacache') campaignFlags = game;
     const selected = project.objects.filter(object => object.status !== 'MISSING' && /\.c$/i.test(object.name) && !config.exclude_sources.includes(object.name)).map(object => object.name);
     // Campaign slice is authored after the imported config; never omit its implementation.
-    if (project.name === 'halobetacache') for (const authored of ['source/game/campaign_coop.c', 'source/game/campaign_mission.c', 'source/game/campaign_mission_apply.c', 'source/main/main_fatal.c']) {
+    if (project.name === 'halobetacache') for (const authored of ['source/game/campaign_coop.c', 'source/game/campaign_mission.c', 'source/game/campaign_mission_apply.c', 'source/main/main_fatal.c', 'source/shell/shell_entry.c']) {
       if (fs.existsSync(authored) && !selected.includes(authored)) selected.push(authored);
     }
     for (const source of selected) add(source, game);
@@ -143,20 +143,24 @@ export function generate(options, args = []) {
       });
       n.build('campaign-apply-controls', 'native_control_run', ['build/linux/campaign_mission_apply_controls']);
     }
-    const authorControl = 'port/web/tests/campaign_mission_author_test.c';
-    if (fs.existsSync(authorControl)) {
-      const authorObject = 'build/linux/obj/port/web/tests/campaign_mission_author_test.o';
-      n.build(authorObject, 'linux_cc', [authorControl], [prefix, semantics, ...sdk], { cflags: flags([...campaignFlags, ...lto]) });
-      n.rule('native_engine_control_link', {
+    n.rule('native_engine_control_link', {
         command: '$linux_cc $ldflags $control -Wl,--start-lib @$out.rsp -Wl,--end-lib -o $out $libs',
         description: 'NATIVE ENGINE CONTROL LINK $out', rspfile: '$out.rsp', rspfile_content: '$in_newline',
-      });
-      n.build('build/linux/campaign_mission_author_controls', 'native_engine_control_link', objects, [authorObject], {
+    });
+    // Reusable engine providers contain no program entry; each control supplies its own main.
+    const controlProviders = objects.filter(object => object !== 'build/linux/obj/source/shell/shell_entry.o');
+    for (const family of ['author', 'datastore', 'activation']) {
+      const authorControl = `port/web/tests/campaign_mission_${family}_test.c`;
+      if (!fs.existsSync(authorControl)) continue;
+      const authorObject = `build/linux/obj/port/web/tests/campaign_mission_${family}_test.o`;
+      n.build(authorObject, 'linux_cc', [authorControl], [prefix, semantics, ...sdk], { cflags: flags([...campaignFlags, ...lto]) });
+      const binary = `build/linux/campaign_mission_${family}_controls`;
+      n.build(binary, 'native_engine_control_link', controlProviders, [authorObject], {
         control: authorObject,
         ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld', ...(options.prefix ? [`-L${shellQuote(path.join(options.prefix, 'lib'))}`, `-Wl,-rpath,${shellQuote(path.resolve(options.prefix, 'lib'))}`] : [])]),
         libs: flags(config.libraries.map(lib => `-l${lib}`)),
       });
-      n.build('campaign-author-controls', 'native_control_run', ['build/linux/campaign_mission_author_controls']);
+      n.build(`campaign-${family}-controls`, 'native_control_run', [binary]);
     }
   }
   n.lines.push('default linux');

@@ -40,6 +40,10 @@ test('authored campaign units join the production and native control graph exact
     assert.equal(output.split('\n').filter(line => line.startsWith(edge)).length, 1);
   }
   const controlEdge = output.split('\n').find(line => line.startsWith('build build/linux/campaign_coop_native_controls:'));
+  assert.match(output, /build build\/linux\/obj\/source\/shell\/shell_entry.o: linux_cc/);
+  const productionEdge = output.split('\n').find(line => line.startsWith('build build/linux/halo:'));
+  assert.ok(productionEdge.includes('build/linux/obj/source/shell/shell_entry.o'));
+  assert.ok(!controlEdge.includes('source/shell/shell_entry.o'));
   for (const name of authored) assert.ok(controlEdge.includes(`build/linux/obj/source/game/${name}.o`));
   assert.ok(controlEdge.includes('build/linux/obj/port/web/tests/campaign_coop_native_controls_test.o'));
   if (fs.existsSync('port/web/tests/campaign_mission_author_test.c')) {
@@ -51,5 +55,12 @@ test('authored campaign units join the production and native control graph exact
       assert.ok(authorEdge.includes(`build/linux/obj/${provider}.o`), provider);
     }
     assert.match(output, /build campaign-author-controls: native_control_run build\/linux\/campaign_mission_author_controls/);
+    for (const family of ['author', 'datastore', 'activation']) {
+      const edge = output.split('\n').find(line => line.startsWith(`build build/linux/campaign_mission_${family}_controls:`));
+      assert.ok(edge.includes(` | build/linux/obj/port/web/tests/campaign_mission_${family}_test.o`));
+      assert.ok(!edge.includes('source/shell/shell_entry.o'));
+      assert.ok(edge.includes('source/shell/shell_xbox.o'));
+      assert.ok(output.includes(`build campaign-${family}-controls: native_control_run build/linux/campaign_mission_${family}_controls`));
+    }
   }
 });
