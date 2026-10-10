@@ -95,7 +95,7 @@ export function generate(options, args = []) {
     if (project.name === 'halobetacache') campaignFlags = game;
     const selected = project.objects.filter(object => object.status !== 'MISSING' && /\.c$/i.test(object.name) && !config.exclude_sources.includes(object.name)).map(object => object.name);
     // Campaign slice is authored after the imported config; never omit its implementation.
-    if (project.name === 'halobetacache') for (const authored of ['source/game/campaign_coop.c', 'source/game/campaign_mission.c']) {
+    if (project.name === 'halobetacache') for (const authored of ['source/game/campaign_coop.c', 'source/game/campaign_mission.c', 'source/game/campaign_mission_apply.c']) {
       if (fs.existsSync(authored) && !selected.includes(authored)) selected.push(authored);
     }
     for (const source of selected) add(source, game);
@@ -126,6 +126,7 @@ export function generate(options, args = []) {
     n.rule('native_control_link', { command: '$linux_cc $ldflags $in -o $out', description: 'NATIVE CONTROL LINK $out' });
     const controlInputs = ['build/linux/obj/source/game/campaign_coop.o', controlObject];
     if (fs.existsSync('source/game/campaign_mission.c')) controlInputs.splice(1, 0, 'build/linux/obj/source/game/campaign_mission.o');
+    if (fs.existsSync('source/game/campaign_mission_apply.c')) controlInputs.splice(2, 0, 'build/linux/obj/source/game/campaign_mission_apply.o');
     n.build('build/linux/campaign_coop_native_controls', 'native_control_link', controlInputs, [], {
       ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, ...(lto.length ? [options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld'] : [])]),
     });
