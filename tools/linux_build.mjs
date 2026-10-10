@@ -95,7 +95,7 @@ export function generate(options, args = []) {
     if (project.name === 'halobetacache') campaignFlags = game;
     const selected = project.objects.filter(object => object.status !== 'MISSING' && /\.c$/i.test(object.name) && !config.exclude_sources.includes(object.name)).map(object => object.name);
     // Campaign slice is authored after the imported config; never omit its implementation.
-    if (project.name === 'halobetacache') for (const authored of ['source/game/campaign_coop.c', 'source/game/campaign_mission.c']) {
+    if (project.name === 'halobetacache') for (const authored of ['source/game/campaign_coop.c', 'source/game/campaign_mission.c', 'source/main/main_fatal.c']) {
       if (fs.existsSync(authored) && !selected.includes(authored)) selected.push(authored);
     }
     for (const source of selected) add(source, game);
@@ -135,7 +135,7 @@ export function generate(options, args = []) {
     if (fs.existsSync(authorControl)) {
       const authorObject = 'build/linux/obj/port/web/tests/campaign_mission_author_test.o';
       n.build(authorObject, 'linux_cc', [authorControl], [prefix, semantics, ...sdk], { cflags: flags([...campaignFlags, ...lto]) });
-      n.build('build/linux/campaign_mission_author_controls', 'native_control_link', [authorObject, 'build/linux/obj/source/cseries/cseries.o', 'build/linux/obj/source/cseries/cseries_windows.o', 'build/linux/obj/source/cseries/stack_walk_windows.o', 'build/linux/obj/port/linux/src/msvc_crt.o'], [], {
+      n.build('build/linux/campaign_mission_author_controls', 'native_control_link', [authorObject, 'build/linux/obj/source/cseries/cseries.o', 'build/linux/obj/source/cseries/cseries_windows.o', 'build/linux/obj/source/cseries/stack_walk_windows.o', 'build/linux/obj/port/linux/src/msvc_crt.o', 'build/linux/obj/source/main/main_fatal.o'], [], {
         ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, ...(lto.length ? [options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld'] : [])]),
       });
       n.build('campaign-author-controls', 'native_control_run', ['build/linux/campaign_mission_author_controls']);
