@@ -126,6 +126,7 @@ static int stub_adapter_init_calls;
 static int stub_adapter_init_fail;
 static int stub_adapter_event_fail;
 static int stub_adapter_restore_fail;
+static int32_t stub_adapter_restored_length;
 
 static int32_t stub_adapter_abi_version(
 	void)
@@ -178,7 +179,7 @@ static int stub_adapter_restore(
 	int32_t image_len)
 {
 	(void)image_in;
-	(void)image_len;
+	stub_adapter_restored_length = image_len;
 	return stub_adapter_restore_fail ? 1 : 0;
 }
 
@@ -490,6 +491,23 @@ int main(
 			event_in, 8, action_out, 16, &produced) ==
 			CAMPAIGN_COOP_ADAPTER_OK);
 		CHECK(produced == 8);
+
+		/* Complete Wasm memory images exceed the event-record ceiling.
+		 * Carry a whole page to the runtime slot, preserving the init
+		 * count and invalidating the preceding generation's traffic. */
+		{
+			static uint8_t page_image[65536];
+			CHECK(campaign_coop_adapter_restore(&adapter, 2, 300, 11,
+				page_image, sizeof(page_image)) == CAMPAIGN_COOP_ADAPTER_OK);
+			CHECK(stub_adapter_restored_length == sizeof(page_image));
+			CHECK(stub_adapter_init_calls == 3);
+			CHECK(campaign_coop_adapter_dispatch(&adapter, 1, 201,
+				event_in, 8, action_out, 16, &produced) ==
+				CAMPAIGN_COOP_ADAPTER_REFUSED);
+			CHECK(campaign_coop_adapter_dispatch(&adapter, 2, 300,
+				event_in, 8, action_out, 16, &produced) ==
+				CAMPAIGN_COOP_ADAPTER_OK);
+		}
 	}
 
 	printf("PASS campaign_coop_native_controls: %d checks\n", checks_run);

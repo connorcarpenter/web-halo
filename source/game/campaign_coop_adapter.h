@@ -44,10 +44,10 @@ enum
 	/* No generation bound: every dispatch/capture/restore refuses. */
 	CAMPAIGN_COOP_ADAPTER_NO_GENERATION = -1,
 
-	/* Adapter-local safety ceiling for one copied payload. Mission
-	 * event/action/snapshot fragments are small typed records; this
-	 * ceiling only stops a corrupt length from overrunning the
-	 * caller's buffers. Larger snapshots cross in fragments. */
+	/* Adapter-local ceiling for init/event records. Complete guest
+	 * memory images use the runtime's memory budget, not this record
+	 * limit: a Wasm memory page is already larger than this ceiling.
+	 * The snapshot slot validates the complete image before restore. */
 	CAMPAIGN_COOP_ADAPTER_MAX_PAYLOAD = 4096,
 };
 
@@ -231,8 +231,7 @@ static inline int campaign_coop_adapter_restore(
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 	if (guest_blob_id != adapter->guest_blob_id)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
-	if (!image_in || image_len <= 0 ||
-		image_len > CAMPAIGN_COOP_ADAPTER_MAX_PAYLOAD)
+	if (!image_in || image_len <= 0)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 	if (adapter->slots.guest_restore_image(image_in, image_len) != 0)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
