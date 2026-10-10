@@ -1149,6 +1149,8 @@
       episodeIndex: mission.episodeIndex,
       encounterCount: mission.encounters.length,
     };
+    session.missionPollGeneration = (session.missionPollGeneration || 0) + 1;
+    scheduleMissionAuthorPoll(session.missionPollGeneration, MISSION_AUTHOR_POLL_MAX_TICKS);
     setHeader("Mission sent to Halo", "waiting");
     setStatus(missionEditorLabel(mission) + " — Halo is saving it…");
     return mission;
@@ -1195,14 +1197,41 @@
       setStatus(missionRefusalText(status));
       return { saved: false, pending: false, status: status };
     }
-    setHeader("Mission sent to Halo", "waiting");
-    setStatus(pending.name + " — Halo hasn't confirmed the save yet.");
+    if (!pending.reported) {
+      pending.reported = true;
+      setHeader("Mission sent to Halo", "waiting");
+      setStatus(pending.name + " — Halo hasn't confirmed the save yet.");
+    }
     return { saved: false, pending: true };
   }
 
   function missionSaveStatus() {
     if (!session.runtimeReady) throw new Error("Halo is still starting.");
+    if (session.mission) session.mission.reported = false;
     return pollMissionAuthor();
+  }
+
+  /* Hazard Run editor roundtrip (Usher 61730): the drain confirms on the
+     game thread, so a requested save re-polls to terminal by itself on a
+     bounded 200 ms tick (450 ticks = 90 s, the lobby join timeout). A
+     terminal save or refusal disarms the loop; expiry keeps the save
+     pending for a manual check. A superseded save's timer polls nothing:
+     the generation at schedule time must still be current. */
+  var MISSION_AUTHOR_POLL_MILLISECONDS = 200;
+  var MISSION_AUTHOR_POLL_MAX_TICKS = 450;
+
+  function scheduleMissionAuthorPoll(generation, ticksLeft) {
+    if (!session.mission || session.missionPollGeneration !== generation) return;
+    if (ticksLeft <= 0) {
+      setHeader("Mission sent to Halo", "waiting");
+      setStatus(session.mission.name + " — Halo hasn't confirmed the save yet.");
+      return;
+    }
+    global.setTimeout(function() {
+      if (!session.mission || session.missionPollGeneration !== generation) return;
+      pollMissionAuthor();
+      if (session.mission) scheduleMissionAuthorPoll(generation, ticksLeft - 1);
+    }, MISSION_AUTHOR_POLL_MILLISECONDS);
   }
 
   /* Hazard Run mission row editor (Usher 61495; bridge contract Finn

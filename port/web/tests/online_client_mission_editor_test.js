@@ -112,6 +112,7 @@ const elements = {};
 ].forEach(id => { elements[id] = element(); });
 
 const missionCalls = [];
+const authorPollTimers = [];
 let beginResult = 1;
 let nameCharResult = 1;
 let encounterResult = 1;
@@ -183,7 +184,10 @@ const context = {
   clearInterval() {},
   clearTimeout() {},
   setInterval: () => 0,
-  setTimeout: () => 0,
+  setTimeout: callback => {
+    authorPollTimers.push(callback);
+    return authorPollTimers.length;
+  },
 };
 context.window = context;
 context.globalThis = context;
@@ -395,4 +399,85 @@ function expectedCalls(mission) {
   assert.equal(encounters().length, 7);
 
   console.log('online_client mission editor DOM tests passed');
+})();
+
+(function () {
+  /* Hazard Run editor roundtrip (Usher 61730): a requested save closes its
+     own loop. The drain confirms on the game thread, so the browser must
+     re-poll to terminal by itself: saved (recorded header matches the
+     staged episode + encounter count), refused (draft reset, disposition
+     reported), or bounded expiry (pending kept for a manual check). A
+     single immediate poll is not the roundtrip. */
+  function drainAuthorTimers() {
+    let ran = 0;
+    while (authorPollTimers.length) {
+      authorPollTimers.shift()();
+      ran++;
+    }
+    return ran;
+  }
+
+  function requestSave() {
+    authorPollTimers.length = 0;
+    missionCalls.length = 0;
+    missionStatus = 0;
+    missionRecorded = -1;
+    context.HaloOnline.missionSave(validMission());
+  }
+
+  /* A requested save schedules its own author poll. */
+  requestSave();
+  assert.equal(authorPollTimers.length, 1,
+    'a requested save must schedule its own author poll');
+  const immediate = context.HaloOnline.missionSaveStatus();
+  assert.equal(immediate.pending, true);
+
+  /* One tick while the drain is silent stays pending and rearms. */
+  authorPollTimers.shift()();
+  assert.equal(authorPollTimers.length, 1,
+    'a silent drain must leave the loop armed');
+
+  /* The recorded header matching the staged save closes the loop with the
+     staged identity, and nothing stays armed. */
+  missionRecorded = (1 << 8) | 2;
+  drainAuthorTimers();
+  assert.equal(authorPollTimers.length, 0,
+    'a terminal save must disarm the loop');
+  assert.match(elements['online-status'].textContent, /Deck Breach.*Episode 2.*2 encounters/);
+  const closed = context.HaloOnline.missionSaveStatus();
+  assert.equal(closed.pending, false);
+  assert.match(elements['online-status'].textContent, /no mission save is pending/i);
+
+  /* A refusal mid-sequence resets the draft and closes the loop. */
+  requestSave();
+  missionStatus = 3;
+  drainAuthorTimers();
+  assert.equal(authorPollTimers.length, 0,
+    'a refused save must disarm the loop');
+  assert.deepEqual(missionCalls.filter(call => call[0] === 'reset').length, 1);
+  assert.match(elements['online-status'].textContent, /encounter/i);
+
+  /* A stale timer from an overwritten save polls nothing. */
+  requestSave();
+  context.HaloOnline.missionSave(validMission());
+  assert.equal(authorPollTimers.length, 2);
+  missionRecorded = (1 << 8) | 2;
+  authorPollTimers.shift()();
+  assert.equal(authorPollTimers.length, 1,
+    'a stale save timer must not close the newer save');
+  assert.doesNotMatch(elements['online-status'].textContent, /Mission saved/);
+  drainAuthorTimers();
+  assert.match(elements['online-status'].textContent, /Deck Breach.*Episode 2.*2 encounters/);
+
+  /* A silent drain exhausts the bound (450 ticks of 200 ms = 90 s), stops
+     re-arming, and keeps the save pending for a manual check. */
+  requestSave();
+  const ran = drainAuthorTimers();
+  assert.equal(ran, 450);
+  assert.equal(authorPollTimers.length, 0);
+  const expired = context.HaloOnline.missionSaveStatus();
+  assert.equal(expired.pending, true);
+  assert.match(elements['online-status'].textContent, /hasn.t confirmed/i);
+
+  console.log('online_client mission editor roundtrip tests passed');
 })();
