@@ -42,6 +42,20 @@ These compiler settings apply to the outer Rust/C host; the interpreter still
 owns separate guest linear memory. No guest entry becomes a JS export. A
 successful archive build alone does not qualify final linking or runtime.
 
+`web_diax_worker` owns guest creation, staged replacement, initial byte delivery
+and destruction on one checked pthread. Replacement requires a newer generation;
+failed admission keeps the prior guest alive. Even an empty init batch must be
+delivered before events or guest image capture. The caller still validates and
+applies the canonical game action batch and binds the matching engine checkpoint.
+These ownership functions do not supply a production mission activation caller.
+
+`bash tools/tests/diax_worker_controls.sh` exercises the actual C worker against
+the native Rust archive and interpreted Wasm fixtures, including a foreign-thread
+refusal, failed replacement, retained init output, traps and same-blob restore.
+It uses ordinary Cargo and clang-18 without engine assets or SDL. The fixtures
+have no campaign vocabulary; this is ownership/byte-boundary coverage, not a
+compiled Rust cooperative mission, browser gameplay or coherent engine restore.
+
 The historical launcher `tools/web_run.py`, ISO extraction and development
 server still require migration. Do not execute those Python paths under the
 current no-Python contract. No game data or runtime operation is needed for graph
