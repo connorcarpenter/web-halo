@@ -40,6 +40,6 @@ run() {
 }
 run "$sdk/upstream/emscripten/emcmake" cmake -S "$source_dir" -B build/web/sdl-build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DSDL_PTHREADS=ON -DSDL_STATIC=ON -DSDL_SHARED=OFF \
-    -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF "-DCMAKE_INSTALL_PREFIX=$project/build/web/sdl-install"
+    -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF "-DCMAKE_INSTALL_PREFIX=$project/build/web/sdl-install"
 run nice -n 19 cmake --build build/web/sdl-build --target SDL3-static --parallel 4
 run cmake --install build/web/sdl-build
