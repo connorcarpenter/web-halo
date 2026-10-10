@@ -57,21 +57,26 @@ enum
  * returns are guest refusals and surface as REFUSED. */
 struct campaign_coop_adapter_slots
 {
+	/* Opaque worker-owned guest; each binding retains its own instance.
+	 * Caller preserves this context until the binding is replaced/destroyed. */
+	void *guest_context;
 	/* Spec __abi_version: the guest's stamped ABI version. */
-	int32_t (*guest_abi_version)(void);
-	/* Spec __init: runs exactly once, on the bind path only. */
-	int (*guest_init)(const uint8_t *params_in, int32_t params_len);
+	int32_t (*guest_abi_version)(void *guest_context);
+	/* Spec __init: runs exactly once on bind; returns pending action length.
+	 * Host must consume/apply these actions before dispatch or checkpoint.
+	 * Negative is refusal. The runtime retains the bytes until consumed. */
+	int (*guest_init)(void *guest_context, const uint8_t *params_in, int32_t params_len);
 	/* Spec __on_event: one serialized mission event in, one action
 	 * out. Returns the action byte length, or negative on refusal. */
-	int (*guest_handle_event)(const uint8_t *event_in, int32_t event_len,
+	int (*guest_handle_event)(void *guest_context, const uint8_t *event_in, int32_t event_len,
 		uint8_t *action_out, int32_t action_capacity);
 	/* Memory-image capture: returns the image byte length, or
 	 * negative on refusal. */
-	int (*guest_capture_image)(uint8_t *image_out, int32_t image_capacity);
+	int (*guest_capture_image)(void *guest_context, uint8_t *image_out, int32_t image_capacity);
 	/* Memory-image restore of a fresh same-blob image: 0 on success,
 	 * nonzero otherwise. Never re-runs __init (structural: the
 	 * restore path below holds no init call). */
-	int (*guest_restore_image)(const uint8_t *image_in, int32_t image_len);
+	int (*guest_restore_image)(void *guest_context, const uint8_t *image_in, int32_t image_len);
 };
 
 struct campaign_coop_adapter
@@ -87,6 +92,8 @@ struct campaign_coop_adapter
 	/* Gapless worker serial fence: dispatch consumes exactly this
 	 * serial, so a stale or replayed event refuses. */
 	uint32_t next_serial;
+	/* Bytes from __init that the host must drain/apply; never discard them. */
+	int32_t initial_action_len;
 	struct campaign_coop_adapter_slots slots;
 };
 
@@ -94,7 +101,7 @@ struct campaign_coop_adapter
 static inline bool campaign_coop_adapter_slots_complete(
 	const struct campaign_coop_adapter_slots *slots)
 {
-	return slots &&
+	return slots && slots->guest_context &&
 		slots->guest_abi_version &&
 		slots->guest_init &&
 		slots->guest_handle_event &&
@@ -128,6 +135,7 @@ static inline int campaign_coop_adapter_bind(
 	uint32_t first_serial)
 {
 	struct campaign_coop_adapter staged;
+	int produced;
 
 	if (!adapter || !campaign_coop_adapter_slots_complete(slots))
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
@@ -138,9 +146,10 @@ static inline int campaign_coop_adapter_bind(
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 	if (!init_params && init_params_len > 0)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
-	if (slots->guest_abi_version() != required_abi_version)
+	if (slots->guest_abi_version(slots->guest_context) != required_abi_version)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
-	if (slots->guest_init(init_params, init_params_len) != 0)
+	produced = slots->guest_init(slots->guest_context, init_params, init_params_len);
+	if (produced < 0 || produced > CAMPAIGN_COOP_ADAPTER_MAX_PAYLOAD)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 
 	staged.bound_generation = generation;
@@ -148,6 +157,7 @@ static inline int campaign_coop_adapter_bind(
 	staged.required_abi_version = required_abi_version;
 	staged.guest_blob_id = guest_blob_id;
 	staged.next_serial = first_serial;
+	staged.initial_action_len = produced;
 	staged.slots = *slots;
 	*adapter = staged;
 	return CAMPAIGN_COOP_ADAPTER_OK;
@@ -156,7 +166,9 @@ static inline int campaign_coop_adapter_bind(
 /* One serialized event against the bound generation. Consumes exactly
  * the fenced serial; stale, future, or cross-generation events refuse
  * without touching the guest, so pre-restore traffic can never leak
- * across a restore. A guest refusal preserves the fence for retry. */
+ * across a restore. A guest refusal preserves the fence. Runtime traps may
+ * mutate guest state and fault the instance; a preserved fence alone does
+ * not permit retry. The real wrapper refuses until valid image restoration. */
 static inline int campaign_coop_adapter_dispatch(
 	struct campaign_coop_adapter *adapter,
 	int32_t generation,
@@ -179,7 +191,7 @@ static inline int campaign_coop_adapter_dispatch(
 	if (!action_out || action_capacity <= 0 || !action_len_out)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 
-	produced = adapter->slots.guest_handle_event(event_in, event_len,
+	produced = adapter->slots.guest_handle_event(adapter->slots.guest_context, event_in, event_len,
 		action_out, action_capacity);
 	if (produced < 0 || produced > action_capacity)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
@@ -203,7 +215,7 @@ static inline int campaign_coop_adapter_capture(
 	if (!image_out || image_capacity <= 0 || !image_len_out)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 
-	produced = adapter->slots.guest_capture_image(image_out, image_capacity);
+	produced = adapter->slots.guest_capture_image(adapter->slots.guest_context, image_out, image_capacity);
 	if (produced < 0 || produced > image_capacity)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 
@@ -233,7 +245,7 @@ static inline int campaign_coop_adapter_restore(
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 	if (!image_in || image_len <= 0)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
-	if (adapter->slots.guest_restore_image(image_in, image_len) != 0)
+	if (adapter->slots.guest_restore_image(adapter->slots.guest_context, image_in, image_len) != 0)
 		return CAMPAIGN_COOP_ADAPTER_REFUSED;
 
 	adapter->bound_generation = generation;

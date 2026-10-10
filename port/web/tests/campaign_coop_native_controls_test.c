@@ -147,30 +147,36 @@ static int stub_adapter_init_fail;
 static int stub_adapter_event_fail;
 static int stub_adapter_restore_fail;
 static int32_t stub_adapter_restored_length;
+static int stub_adapter_context;
 
 static int32_t stub_adapter_abi_version(
-	void)
+	void *context)
 {
+	if (context != &stub_adapter_context) return -1;
 	return stub_adapter_abi;
 }
 
 static int stub_adapter_init(
+	void *context,
 	const uint8_t *params_in,
 	int32_t params_len)
 {
 	(void)params_in;
 	(void)params_len;
+	if (context != &stub_adapter_context) return -1;
 	stub_adapter_init_calls++;
-	return stub_adapter_init_fail ? 1 : 0;
+	return stub_adapter_init_fail ? -1 : 0;
 }
 
 static int stub_adapter_handle(
+	void *context,
 	const uint8_t *event_in,
 	int32_t event_len,
 	uint8_t *action_out,
 	int32_t action_capacity)
 {
 	int32_t i;
+	if (context != &stub_adapter_context) return -1;
 
 	if (stub_adapter_event_fail)
 		return -1;
@@ -182,9 +188,11 @@ static int stub_adapter_handle(
 }
 
 static int stub_adapter_capture(
+	void *context,
 	uint8_t *image_out,
 	int32_t image_capacity)
 {
+	if (context != &stub_adapter_context) return -1;
 	if (image_capacity < 4)
 		return -1;
 	image_out[0] = 1;
@@ -195,9 +203,11 @@ static int stub_adapter_capture(
 }
 
 static int stub_adapter_restore(
+	void *context,
 	const uint8_t *image_in,
 	int32_t image_len)
 {
+	if (context != &stub_adapter_context) return -1;
 	(void)image_in;
 	stub_adapter_restored_length = image_len;
 	return stub_adapter_restore_fail ? 1 : 0;
@@ -437,6 +447,7 @@ int main(
 		uint8_t image[32];
 		int32_t produced = -1;
 
+		slots.guest_context = &stub_adapter_context;
 		slots.guest_abi_version = stub_adapter_abi_version;
 		slots.guest_init = stub_adapter_init;
 		slots.guest_handle_event = stub_adapter_handle;
