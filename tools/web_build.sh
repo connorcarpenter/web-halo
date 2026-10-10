@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
-# Browser Ninja graph only. Vendor emcc and the SDL user port still require Python.
+# Existing browser graph using unchanged SDK entries and SDL's CMake build.
 set -euo pipefail
 web_cc=''
 release=false
 launcher=''
+emsdk=''
 while (($#)); do
   case "$1" in
     --web-cc|--compiler-launcher) (($# >= 2)) || { echo "Missing value: $1" >&2; exit 2; }; if [[ $1 == --web-cc ]]; then web_cc=$2; else launcher=$2; fi; shift 2 ;;
     --release) release=true; shift ;;
+    --sdk) (($# >= 2)) || { echo 'Missing --sdk path' >&2; exit 2; }; emsdk=$2; shift 2 ;;
     --help|-h) echo 'Usage: bash tools/web_build.sh [--web-cc BINARY] [--compiler-launcher BINARY] [--release]'; exit 0 ;;
     *) echo "Unsupported web argument: $1" >&2; exit 2 ;;
   esac
 done
 command -v jq >/dev/null || { echo 'Browser configuration requires jq' >&2; exit 1; }
 [[ -f port/linux/port.json && -f port/web/shell.html ]] || { echo 'Browser configuration inputs missing' >&2; exit 1; }
-if [[ -z $web_cc ]]; then
-  if [[ -f build/emsdk/upstream/emscripten/emcc ]]; then web_cc=build/emsdk/upstream/emscripten/emcc; else web_cc=$(command -v emcc || printf emcc); fi
-fi
+[[ -n $emsdk ]] || { echo 'Browser configuration requires --sdk DIRECTORY outside the project and agent home' >&2; exit 2; }
+emsdk=$(realpath -m "$emsdk")
+case "$emsdk/" in "$(pwd -P)/"*|"$(dirname "$(pwd -P)")/"*) echo 'SDK must be outside the project and agent home' >&2; exit 2 ;; esac
+if [[ -z $web_cc ]]; then web_cc="$emsdk/upstream/emscripten/emcc"; fi
 np() { local v=$1; v=${v//\$/\$\$}; v=${v// /\$ }; v=${v//:/\$:}; printf '%s' "$v"; }
 sq() { local v=$1; v=${v//\'/\'\\\'\'}; printf "'%s'" "$v"; }
 literal() { local v=$1; [[ $v != *$'\n'* && $v != *$'\r'* ]] || exit 2; printf '%s' "${v//\$/\$\$}"; }
@@ -27,19 +30,21 @@ sdk=port/include/xdk
 prefix=port/linux/include/halo_linux_prefix.h
 semantics=build/web/halo_msvc_semantics.h
 platform_semantics=build/web/platform_msvc_semantics.h
-sdl='--use-port=port/web/halo_sdl3.py'
+sdl="-I$(sq build/web/sdl-install/include)"
 abi="-DHALO_WEB=1 -DHALO_ANDROID=1 -fms-extensions -fshort-wchar -fcommon -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -fno-omit-frame-pointer -ffp-contract=off -O2 -pthread $sdl"
 debug=-g; assertions=1
 if $release; then abi+=' -DHALO_RELEASE'; debug=''; assertions=0; else abi+=' -g'; fi
 game_flags='-std=gnu89 -D__STRICT_ANSI__ -w -Wno-error=incompatible-pointer-types -Wno-error=incompatible-function-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=return-type'
 platform_flags='-std=gnu11 -D_GNU_SOURCE -DHALO_LINUX_PLATFORM_LAYER -w'
 posix="-DHALO_WEB=1 -DHALO_ANDROID=1 -std=gnu11 -D_GNU_SOURCE -O2 -g -pthread -w -I$(sq "$platform")"
-printf '# Browser graph; SDK Python execution remains an unresolved prerequisite.\nweb_cc = %s\n' "$(literal "$(sq "$web_cc")")"
-regen="sh configure.sh --web --web-cc $(sq "$web_cc")"
+printf '# Browser graph; unchanged external SDK, SDL 3.4.16 static library.\nweb_cc = %s\n' "$(literal "$(sq "$web_cc")")"
+regen="sh configure.sh --web --sdk $(sq "$emsdk") --web-cc $(sq "$web_cc")"
 if $release; then regen+=' --release'; fi
 if [[ -n $launcher ]]; then regen+=" --compiler-launcher $(sq "$launcher")"; fi
 printf 'rule configure_web\n  command = %s\n  generator = 1\n  description = CONFIGURE browser\n' "$(literal "$regen")"
 edge build.ninja configure_web configure.sh tools/web_build.sh tools/linux_msvc_semantics.mjs config/config.json port/linux/port.json port/web/src port/web/assets port/linux/src port/linux/game source/game port/include/xdk
+printf 'rule web_sdl\n  command = bash tools/web_sdl.sh --sdk %s\n  description = WEB SDL 3.4.16\n' "$(literal "$(sq "$emsdk")")"
+edge build/web/sdl-install/lib/libSDL3.a web_sdl tools/web_sdl.sh build/native-deps/SDL-release-3.4.16/CMakeLists.txt build/native-deps/SDL-release-3.4.16/include/SDL3/SDL_version.h
 printf '%s\n' 'rule web_msvc_semantics' '  command = node tools/linux_msvc_semantics.mjs --output $out $scan' '  description = WEB MSVC SEMANTICS $out' '  restat = 1'
 mapfile -d '' -t sdk_headers < <(find "$sdk" -maxdepth 1 -type f -name '*.h' -print0 | sort -z)
 mapfile -d '' -t game_headers < <(find source -type f \( -name '*.c' -o -name '*.h' \) -print0 | sort -z)
@@ -60,7 +65,7 @@ add_object() {
   objects+=("$object")
   printf 'build %s: web_cc %s | %s %s %s' "$(np "$object")" "$(np "$source")" "$(np "$prefix")" "$(np "$semantics")" "$(np "$platform_semantics")"
   for header in "${sdk_headers[@]}"; do printf ' %s' "$(np "$header")"; done
-  printf '\n  cflags = %s\n' "$(literal "$cflags")"
+  printf ' || build/web/sdl-install/lib/libSDL3.a\n  cflags = %s\n' "$(literal "$cflags")"
 }
 variadic=' source/ai/action_uncover.c source/ai/ai.c source/ai/ai_debug.c source/bungie_net/common/public_key_crypt.c source/camera/editor_flying_camera.c source/game/cheats.c source/game/game_engine.c source/game/players.c source/hs/hs.c source/interface/hud_nav_points.c source/interface/ui_widget_game_data_input_functions.c source/networking/telnet_console.c source/rasterizer/xbox/rasterizer_xbox_errors.c source/render/render.c '
 while IFS= read -r project; do
@@ -90,9 +95,9 @@ add_object port/third_party/kcp/ikcp.c "$abi -std=gnu11 -w"
 while IFS= read -r -d '' source; do add_object "$source" "$abi -std=gnu11 -w -Iport/third_party/musl-math/include -include port/third_party/musl-math/include/libm.h" musl-math/; done < <(find port/third_party/musl-math/src -maxdepth 1 -type f -name '*.c' -print0 | sort -z)
 printf 'build build/web/halo.html | build/web/halo.js build/web/halo.wasm: web_link'
 for object in "${objects[@]}"; do printf ' %s' "$(np "$object")"; done
-printf ' | port/web/shell.html port/web/halo_sdl3.py port/web/xiso.js port/web/fetch_path_normalization.js port/web/online_client.js port/web/library_web_transport.js\n'
+printf ' | build/web/sdl-install/lib/libSDL3.a port/web/shell.html port/web/xiso.js port/web/fetch_path_normalization.js port/web/online_client.js port/web/library_web_transport.js\n'
 printf '  ldflags = -O2 %s -pthread %s -sPROXY_TO_PTHREAD=1 -sPTHREAD_POOL_SIZE=16 -sOFFSCREENCANVAS_SUPPORT=1 -sOFFSCREENCANVASES_TO_PTHREAD=#canvas -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sFULL_ES3=1 -sGL_ENABLE_GET_PROC_ADDRESS=1 -sWASMFS=1 -sFORCE_FILESYSTEM=1 -sINITIAL_MEMORY=2415919104 -sMAXIMUM_MEMORY=4294967296 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=5242880 -sDEFAULT_PTHREAD_STACK_SIZE=2097152 -sEXIT_RUNTIME=0 -sASSERTIONS=%s -sENVIRONMENT=web,worker -sERROR_ON_UNDEFINED_SYMBOLS=1 --shell-file port/web/shell.html --pre-js port/web/xiso.js --pre-js port/web/fetch_path_normalization.js --pre-js port/web/online_client.js\n' "$debug" "$sdl" "$assertions"
-printf '%s\n' '  libs = -lfetchfs.js -lopfs.js --js-library port/web/library_web_transport.js' 'rule web_copy_asset' '  command = mkdir -p "$$(dirname "$out")" && cp -p "$in" "$out"' '  description = WEB ASSET $out'
+printf '%s\n' '  libs = build/web/sdl-install/lib/libSDL3.a -lfetchfs.js -lopfs.js --js-library port/web/library_web_transport.js' 'rule web_copy_asset' '  command = mkdir -p "$$(dirname "$out")" && cp -p "$in" "$out"' '  description = WEB ASSET $out'
 assets=()
 while IFS= read -r -d '' source; do output="build/web/${source#port/web/}"; assets+=("$output"); edge "$output" web_copy_asset "$source"; done < <(if [[ -d port/web/assets ]]; then find port/web/assets -type f -print0 | sort -z; fi)
 edge web phony build/web/halo.html build/web/halo.js build/web/halo.wasm "${assets[@]}"

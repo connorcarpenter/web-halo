@@ -3,7 +3,7 @@
 Generate the existing browser Ninja target without executing Python:
 
 ```sh
-sh configure.sh --web --release --web-cc /path/to/emcc
+sh configure.sh --web --release --sdk /external/path/to/emsdk
 ninja -t commands build/web/obj/port/web/src/web_online_ui.o
 ```
 
@@ -18,15 +18,16 @@ browser adapters and UI asset copies. Authored campaign units join the game list
 Ninja without executing compiler commands. This is command-generation evidence,
 not browser C compilation, browser gameplay, or complete launcher migration.
 
-## Unresolved execution boundary
+## SDK and SDL execution boundary
 
-The custom SDL port remains `port/web/halo_sdl3.py`, pinned to SDL 3.4.16 and its
-existing SHA512. Its Python hook is retained explicitly rather than silently
-removed. The inspected Emscripten 4.0.16 `emcc` wrapper itself executes Python;
-that inspected version is **not** a compatible or qualified SDK selection.
-No SDK version is currently pinned by this project. Compiler execution awaits a
-supported policy/source contract; do not replace emcc with raw clang and claim
-the browser target has been qualified.
+The graph replaces the historical Python SDL hook with SDL 3.4.16's supported
+Emscripten CMake build (`tools/web_sdl.sh`), using retained source, generated SDL
+configuration headers and a pthread-enabled static library. It does not select
+the SDK's older SDL port. Historical files remain preserved, not executable hooks.
+The SDK must be installed outside the project and agent home. Signed policy
+permits unchanged upstream compiler internals through documented shell entries;
+direct Python invocations, vendor patches and project Python hooks remain barred.
+Emscripten 6.0.12 is the candidate pin, not yet installed or browser-qualified.
 
 The historical launcher `tools/web_run.py`, ISO extraction and development
 server still require migration. Do not execute those Python paths under the
