@@ -16,8 +16,6 @@ symbols in this file:
 	_shell_idle (0000)
 00180AB0 00d0:
 	_fuck_code_in_the_eye (0000)
-00180B80 0090:
-	_main (0000)
 002A0A78 0007:
 	??_C@_06GAOAIMNN@xdemo?5?$AA@ (0000)
 002A0A80 0007:
@@ -35,18 +33,6 @@ symbols in this file:
 #include "shell.h"
 #include "physical_memory_map.h"
 #include "main.h"
-
-#ifdef HALO_WEB
-void platform_web_initialize(void);
-#endif
-
-/* ---------- prototypes */
-
-void fuck_code_in_the_eye(
-	void);
-
-boolean rasterizer_preinitialize__fill_you_up_with_the_devils_cock(
-	void);
 
 /* ---------- globals */
 
@@ -105,40 +91,6 @@ shell_idle(
 	void)
 {
 	return;
-}
-
-#ifdef HALO_WEB
-int main(
-	int argc,
-	char **argv)
-#else
-int main(
-	void)
-#endif
-{
-#ifdef HALO_WEB
-	(void)argc;
-	(void)argv;
-	platform_web_initialize();
-#endif
-	fuck_code_in_the_eye();
-	rasterizer_preinitialize__fill_you_up_with_the_devils_cock();
-	physical_memory_allocate();
-
-	__try
-	{
-		if (shell_initialize())
-		{
-			main_loop();
-			shell_dispose();
-		}
-	}
-	__except (generic_exception_filter(GetExceptionCode(), GetExceptionInformation()))
-	{
-		halt_and_catch_fire();
-	}
-
-	return EXIT_SUCCESS;
 }
 
 /* ---------- private code */

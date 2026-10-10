@@ -340,6 +340,7 @@ symbols in this file:
 #include "game.h"
 #include "game_engine.h"
 #include "game/campaign_coop.h"
+#include "game/campaign_mission.h"
 #include "game/cheats.h"
 #include "game/player_control.h"
 #include "game/player_control_runtime.h"
@@ -649,24 +650,7 @@ struct game_options
 typedef char game_options_size_assert[
 	sizeof(struct game_options) == 0x10C ? 1 : -1];
 
-#pragma pack(push, 1)
-struct _screenshot_and_framerate_globals
-{
-	short count;
-	byte reserved002[6];
-	struct render_window windows[MAXIMUM_WINDOWS + 1];
-	real framerate_samples[8];
-	word framerate_flags;
-	char framerate_sample_index;
-	boolean framerate_active;
-	char framerate_counter;
-	boolean framerate_reset;
-	boolean halt_recursion_lock;
-};
-#pragma pack(pop)
-
-typedef char screenshot_and_framerate_globals_size_assert[
-	sizeof(struct _screenshot_and_framerate_globals) == 0x38B ? 1 : -1];
+#include "main_screenshot.h"
 
 #ifdef HALO_LINUX
 void network_test_update(boolean main_menu_loaded, real seconds);
@@ -858,7 +842,17 @@ static void create_local_players(
 		struct campaign_coop_session formed_session;
 
 		if (campaign_coop_session_form(&formed_session, campaign_coop_host_episode()))
+		{
 			campaign_coop_session_commit(&formed_session);
+			/* Hazard Run (Vehicle A, play path): activate the authored
+			 * episode mission against the loaded scenario. The scenario
+			 * is loaded here (game_load succeeded), so real volume
+			 * semantics apply. Refusals (no record, no scenario,
+			 * out-of-range volumes, unresolved explicit anchors) leave
+			 * activation untouched; the encounter layer reads
+			 * campaign_mission_activated(). */
+			(void)campaign_mission_activate(formed_session.episode_index, NULL);
+		}
 	}
 
 	return;
@@ -2883,136 +2877,6 @@ void main_framerate_render(
 		}
 	}
 
-	return;
-}
-
-void halt_and_catch_fire(
-	void)
-{
-	short gamepad_index;
-	long font_tag_index;
-	struct scenario *scenario;
-	struct rasterizer_frame_begin_parameters frame_parameters;
-	struct rasterizer_window_begin_parameters window_parameters;
-
-#ifdef HALO_WEB
-	platform_log("web halt: %s", error_get());
-
-	// A fatal error can arrive inside Emscripten's proxied main-loop callback.
-	// The native halt loop below never returns, so its presents cannot complete
-	// in that environment and instead become an unbounded CPU/swap loop.
-	// Stop future callbacks and terminate this web runtime; native builds retain
-	// the original on-screen halt behavior.
-	emscripten_cancel_main_loop();
-	emscripten_force_exit(EXIT_FAILURE);
-#endif
-
-	if (!global_screenshot_count.halt_recursion_lock)
-	{
-		scenario = global_scenario_try_and_get();
-		global_screenshot_count.halt_recursion_lock = TRUE;
-		for (gamepad_index = 0; gamepad_index < MAXIMUM_GAMEPADS; gamepad_index++)
-		{
-			if (input_has_gamepad(gamepad_index))
-			{
-				input_set_gamepad_rumbler_state(
-					gamepad_index,
-					0,
-					0);
-			}
-		}
-
-		if (scenario)
-		{
-			font_tag_index = interface_get_tag_index(_interface_font_terminal);
-		}
-		if (!scenario || font_tag_index == NONE)
-		{
-			font_tag_index = tag_loaded(
-				FONT_GROUP_TAG,
-				"old tags\\internal system plain");
-		}
-
-		while (TRUE)
-		{
-			rasterizer_reset_state();
-			csmemset(&frame_parameters, 0, sizeof(frame_parameters));
-			rasterizer_frame_begin(&frame_parameters);
-			rasterizer_windows_begin();
-
-			csmemset(&window_parameters, 0, sizeof(window_parameters));
-			window_parameters.camera.position = *global_origin3d;
-			window_parameters.camera.forward = *global_forward3d;
-			window_parameters.camera.up = *global_up3d;
-			window_parameters.camera.mirrored = FALSE;
-			window_parameters.camera.vertical_field_of_view =
-				2.0f * arctangent(
-					0.75f * render_camera_get_adjusted_field_of_view_tangent(
-						DEGREES_TO_RADIANS(80.0f)),
-					1.0f);
-			window_parameters.camera.z_near = rasterizer_globals.near_clip_distance;
-			window_parameters.camera.viewport_bounds.x0 = 0;
-#ifdef HALO_LINUX
-			window_parameters.camera.viewport_bounds.x1 = (short)halo_screen_width();
-#else
-			window_parameters.camera.viewport_bounds.x1 = 640;
-#endif
-			window_parameters.camera.viewport_bounds.y0 = 0;
-			window_parameters.camera.viewport_bounds.y1 = 480;
-			window_parameters.camera.z_far = rasterizer_globals.far_clip_distance;
-			render_camera_build_frustum(
-				&window_parameters.camera,
-				NULL,
-				&window_parameters.frustum,
-				TRUE);
-			window_parameters.rasterizer_target = 0;
-			window_parameters.fog.atmospheric_color = *global_real_rgb_blue;
-			window_parameters.fog.atmospheric_maximum_distance = 0.0f;
-			window_parameters.fog.atmospheric_minimum_distance = 0.0f;
-			window_parameters.fog.planar_mode = 0;
-			render.camera = window_parameters.camera;
-			rasterizer_window_begin(&window_parameters);
-
-			if (font_tag_index != NONE)
-			{
-				point2d cursor = { 0, 0 };
-				rectangle2d bounds = rasterizer_globals.reserved04.frame_bounds;
-
-				draw_string_set_draw_mode(
-					font_tag_index,
-					NONE,
-					0,
-					0,
-					global_real_argb_white);
-				draw_string_set_tab_stops(NULL, 0);
-				draw_string_set_color(global_real_argb_white);
-				rasterizer_draw_string(
-					&bounds,
-					NULL,
-					&cursor,
-					-4,
-					"halobeta xbox 01.01.14.2342 built at: Jan 14 2002 12:49:20");
-				bounds.y0 = cursor.y - 1;
-				rasterizer_draw_string(
-					&bounds,
-					NULL,
-					&cursor,
-					-4,
-					error_get());
-			}
-
-			rasterizer_transparent_geometry_draw(TRUE);
-			rasterizer_transparent_geometry_draw(FALSE);
-			rasterizer_debug_draw();
-			rasterizer_window_end();
-			rasterizer_windows_end();
-			rasterizer_frame_end();
-			rasterizer_present(NULL, NULL);
-			input_update();
-		}
-	}
-
-	exit(0);
 	return;
 }
 

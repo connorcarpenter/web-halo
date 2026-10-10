@@ -11,4 +11,7 @@ SHELL_XBOX.H
 const char *shell_get_command_line(
 	void);
 
+void fuck_code_in_the_eye(
+	void);
+
 #endif // __SHELL_XBOX_H

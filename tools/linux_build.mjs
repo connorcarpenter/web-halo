@@ -95,7 +95,7 @@ export function generate(options, args = []) {
     if (project.name === 'halobetacache') campaignFlags = game;
     const selected = project.objects.filter(object => object.status !== 'MISSING' && /\.c$/i.test(object.name) && !config.exclude_sources.includes(object.name)).map(object => object.name);
     // Campaign slice is authored after the imported config; never omit its implementation.
-    if (project.name === 'halobetacache') for (const authored of ['source/game/campaign_coop.c', 'source/game/campaign_mission.c']) {
+    if (project.name === 'halobetacache') for (const authored of ['source/game/campaign_coop.c', 'source/game/campaign_mission.c', 'source/game/campaign_mission_apply.c', 'source/main/main_fatal.c', 'source/shell/shell_entry.c']) {
       if (fs.existsSync(authored) && !selected.includes(authored)) selected.push(authored);
     }
     for (const source of selected) add(source, game);
@@ -126,11 +126,42 @@ export function generate(options, args = []) {
     n.rule('native_control_link', { command: '$linux_cc $ldflags $in -o $out', description: 'NATIVE CONTROL LINK $out' });
     const controlInputs = ['build/linux/obj/source/game/campaign_coop.o', controlObject];
     if (fs.existsSync('source/game/campaign_mission.c')) controlInputs.splice(1, 0, 'build/linux/obj/source/game/campaign_mission.o');
+    if (fs.existsSync('source/game/campaign_mission_apply.c')) controlInputs.splice(2, 0, 'build/linux/obj/source/game/campaign_mission_apply.o');
     n.build('build/linux/campaign_coop_native_controls', 'native_control_link', controlInputs, [], {
       ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, ...(lto.length ? [options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld'] : [])]),
     });
     n.rule('native_control_run', { command: '$in', description: 'RUN campaign native controls' });
     n.build('campaign-native-controls', 'native_control_run', ['build/linux/campaign_coop_native_controls']);
+    const applyControl = 'port/web/tests/campaign_mission_apply_test.c';
+    if (fs.existsSync(applyControl)) {
+      const applyObject = 'build/linux/obj/port/web/tests/campaign_mission_apply_test.o';
+      n.build(applyObject, 'linux_cc', [applyControl], [], {
+        cflags: flags(['--target=i686-linux-gnu', '-m32', '-std=gnu11', '-Isource', ...lto]),
+      });
+      n.build('build/linux/campaign_mission_apply_controls', 'native_control_link', [applyObject, 'build/linux/obj/source/game/campaign_mission_apply.o'], [], {
+        ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, ...(lto.length ? [options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld'] : [])]),
+      });
+      n.build('campaign-apply-controls', 'native_control_run', ['build/linux/campaign_mission_apply_controls']);
+    }
+    n.rule('native_engine_control_link', {
+        command: '$linux_cc $ldflags $control -Wl,--start-lib @$out.rsp -Wl,--end-lib -o $out $libs',
+        description: 'NATIVE ENGINE CONTROL LINK $out', rspfile: '$out.rsp', rspfile_content: '$in_newline',
+    });
+    // Reusable engine providers contain no program entry; each control supplies its own main.
+    const controlProviders = objects.filter(object => object !== 'build/linux/obj/source/shell/shell_entry.o');
+    for (const family of ['author', 'datastore', 'activation']) {
+      const authorControl = `port/web/tests/campaign_mission_${family}_test.c`;
+      if (!fs.existsSync(authorControl)) continue;
+      const authorObject = `build/linux/obj/port/web/tests/campaign_mission_${family}_test.o`;
+      n.build(authorObject, 'linux_cc', [authorControl], [prefix, semantics, ...sdk], { cflags: flags([...campaignFlags, ...lto]) });
+      const binary = `build/linux/campaign_mission_${family}_controls`;
+      n.build(binary, 'native_engine_control_link', controlProviders, [authorObject], {
+        control: authorObject,
+        ldflags: flags(['--target=i686-linux-gnu', '-m32', '-no-pie', ...lto, options.ld ? `--ld-path=${shellQuote(options.ld)}` : '-fuse-ld=lld', ...(options.prefix ? [`-L${shellQuote(path.join(options.prefix, 'lib'))}`, `-Wl,-rpath,${shellQuote(path.resolve(options.prefix, 'lib'))}`] : [])]),
+        libs: flags(config.libraries.map(lib => `-l${lib}`)),
+      });
+      n.build(`campaign-${family}-controls`, 'native_control_run', [binary]);
+    }
   }
   n.lines.push('default linux');
   return n.toString();
