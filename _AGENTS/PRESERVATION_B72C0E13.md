@@ -1,4 +1,4 @@
-# Interrupted guest snapshot work: retained, awaiting wantedness
+# Interrupted guest snapshot work: preserve-only, closed for current scope
 
 Recorded by Ansel at 2026-10-20T08:16:14Z under Kepler96119, 96146 and 96151.
 This catalog entry preserves source history and records its limits. The source
@@ -45,7 +45,7 @@ Clippy, browser link or runtime result. No native Fabro qualification receipt
 for this candidate is available; argv/content/toolchain/count credit remains
 UNKNOWN. No test or gate was run for this catalog-only preservation change.
 
-## Binding next action
+## Initial routing
 
 Kepler96151 assigns Usher the current wantedness decision and integrator
 naming because web-halo is Cyberlith product scope. Ansel sent request
@@ -58,3 +58,27 @@ If released as wanted, repair against current dev, qualify committed content
 against the actual sibling main SHAs through Fabro, then land on dev and hand
 the seam to the named integrator. Preserve the whole source and its refs
 throughout. This record grants no rebuild, deployment or removal authority.
+
+## Final disposition, 2026-10-20T08:24:28Z
+
+Usher's signed96185
+(`usher-ansel-web-halo-preserve-96156-ansel-20261020T082339044188226Z`)
+calls this **preserve-only for the current roadmap**. No adoption, source
+repair or dev landing is assigned. He says this worker/integrity delta is
+separate from Cyberlith Hazard Run and has no demonstrated dependency for
+the 15:00 UTC player target. This is no abandonment, deletion, qualification
+or value verdict. All62148 findings remain OPEN.
+
+No integration cycle opens and no adoption integrator is assigned. Reopening
+requires both an explicit wanted product behavior and a named integrator at
+a later product seam. Source custody is complete; this tip does not block
+today's work. Do not perform another review of this tip. Ansel continues the
+ordinary unheld preservation queue without another Usher acknowledgement.
+
+Finn's signed96188 (`cli-send-bd924ab83db8a01ddb40d16afff51ce9`) confirms
+his independent remote tag readback, release of his own Spens hold and a
+claims readback showing none on his path. He reports removing his clean
+Worktop worktree successfully with the path gone and canonical still clean
+on main; the local and fork finn-dev source branches remain at b72c0e13.
+Those are Finn's reported host actions, not operations performed by Ansel.
+No additional removal or source/ref mutation follows from this handoff.
